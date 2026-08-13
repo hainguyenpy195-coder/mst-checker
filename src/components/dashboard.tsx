@@ -55,6 +55,7 @@ type TaxpayerRow = {
 };
 
 type Summary = { total: number; active: number; inactive: number; errors: number };
+const EMPTY_SUMMARY: Summary = { total: 0, active: 0, inactive: 0, errors: 0 };
 type DeleteTarget = { taxCode: string; name: string | null };
 type ActivityRow = {
   id: number;
@@ -123,7 +124,7 @@ export default function Dashboard({ username }: DashboardProps) {
   const [years, setYears] = useState<string[]>(DEFAULT_YEARS);
   const [selectedYear, setSelectedYear] = useState(routeYear ?? DEFAULT_YEAR);
   const [rows, setRows] = useState<TaxpayerRow[]>([]);
-  const [summary, setSummary] = useState<Summary>({ total: 0, active: 0, inactive: 0, errors: 0 });
+  const [overviewSummary, setOverviewSummary] = useState<Summary>(EMPTY_SUMMARY);
   const [activityRows, setActivityRows] = useState<ActivityRow[]>([]);
   const [isActivityLoading, setIsActivityLoading] = useState(false);
   const [activityError, setActivityError] = useState<string | null>(null);
@@ -188,7 +189,7 @@ export default function Dashboard({ username }: DashboardProps) {
       const payload = await response.json() as { rows?: TaxpayerRow[]; summary?: Summary; years?: string[]; error?: string };
       if (!response.ok) throw new Error(payload.error ?? "Không thể tải danh sách.");
       setRows(payload.rows ?? []);
-      setSummary(payload.summary ?? { total: 0, active: 0, inactive: 0, errors: 0 });
+      if (activeYear === "all") setOverviewSummary(payload.summary ?? EMPTY_SUMMARY);
       if (payload.years?.length) {
         setYears(payload.years);
         if (viewMode === "sheets" && !payload.years.includes(selectedYear)) {
@@ -202,6 +203,17 @@ export default function Dashboard({ username }: DashboardProps) {
       setRows([]);
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function loadOverviewSummary() {
+    try {
+      const response = await fetch("/api/taxpayers?year=all&limit=5000", { cache: "no-store" });
+      const payload = await response.json() as { summary?: Summary; error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Không thể tải thống kê tổng hợp.");
+      setOverviewSummary(payload.summary ?? EMPTY_SUMMARY);
+    } catch (summaryError) {
+      console.error("overview summary load failed", summaryError);
     }
   }
 
@@ -227,6 +239,13 @@ export default function Dashboard({ username }: DashboardProps) {
     // The active year is the intended refresh boundary for this dashboard.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeYear, viewMode]);
+
+  useEffect(() => {
+    if (viewMode === "overview") return;
+    void loadOverviewSummary();
+    // The overview KPI source is intentionally independent of the active tab.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode]);
 
   useEffect(() => {
     if (!notice) return;
@@ -336,6 +355,7 @@ export default function Dashboard({ username }: DashboardProps) {
       const payload = await response.json() as { error?: string; message?: string };
       if (!response.ok && response.status !== 202) throw new Error(payload.error ?? "Không thể cập nhật MST.");
       await loadData();
+      await loadOverviewSummary();
       if (payload.message) setError(payload.message);
     } catch (refreshError) {
       setError(refreshError instanceof Error ? refreshError.message : "Không thể cập nhật MST.");
@@ -461,6 +481,7 @@ export default function Dashboard({ username }: DashboardProps) {
       navigateToView("sheets", newYear);
       setNotice(`Đã thêm MST ${taxCode} vào năm ${newYear}.`);
       await loadData();
+      await loadOverviewSummary();
       const warnings = [payload.refreshWarning, payload.activityWarning].filter(Boolean);
       if (warnings.length) setError(warnings.join(" "));
     } catch (addError) {
@@ -511,6 +532,7 @@ export default function Dashboard({ username }: DashboardProps) {
       setDeleteTarget(null);
       setNotice(payload.message ?? `Đã xóa MST ${deletedTaxCode} khỏi danh mục.`);
       await loadData();
+      await loadOverviewSummary();
       if (payload.activityWarning) setError(payload.activityWarning);
     } catch (deleteRequestError) {
       setDeleteError(deleteRequestError instanceof Error ? deleteRequestError.message : "Không thể xóa MST.");
@@ -525,10 +547,10 @@ export default function Dashboard({ username }: DashboardProps) {
     { label: "Lịch sử", icon: ClockCounterClockwise, mode: "activity" as ViewMode },
   ];
   const sidebarKpis = [
-    { label: "Tổng cộng", value: summary.total, tone: "total" },
-    { label: "Đang hoạt động", value: summary.active, tone: "active" },
-    { label: "Không hoạt động", value: summary.inactive, tone: "inactive" },
-    { label: "Lỗi đồng bộ", value: summary.errors, tone: "error" },
+    { label: "Tổng cộng", value: overviewSummary.total, tone: "total" },
+    { label: "Đang hoạt động", value: overviewSummary.active, tone: "active" },
+    { label: "Không hoạt động", value: overviewSummary.inactive, tone: "inactive" },
+    { label: "Lỗi đồng bộ", value: overviewSummary.errors, tone: "error" },
   ];
 
   return (
