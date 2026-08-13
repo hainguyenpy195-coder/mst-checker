@@ -1,11 +1,18 @@
 import * as cheerio from "cheerio";
+import { rootCertificates } from "node:tls";
+import { Agent } from "undici";
 import { normalizeTaxCode } from "@/lib/tax-code";
+import { GLOBALSIGN_RSA_OV_SSL_CA_2018 } from "@/lib/gdt-ca";
 
 const GDT_BASE_URL = "https://tracuunnt.gdt.gov.vn";
 const GDT_LOOKUP_URL = `${GDT_BASE_URL}/tcnnt/mstdn.jsp`;
 const DEFAULT_CAPTCHA_PATH = "/tcnnt/captcha.png?uid=";
 const EMPTY_RESULT_RETRIES = 2;
 const EMPTY_RESULT_RETRY_DELAYS_MS = [500, 1_000];
+const GDT_HTTPS_AGENT = new Agent({
+  // Keep Node's bundled roots and add the intermediate omitted by GDT.
+  connect: { ca: [ ...rootCertificates, GLOBALSIGN_RSA_OV_SSL_CA_2018 ] },
+});
 
 export type GdtLookupRecord = {
   taxCode: string;
@@ -72,7 +79,8 @@ async function requestGdt(
       headers,
       cache: "no-store",
       redirect: "follow",
-    });
+      dispatcher: GDT_HTTPS_AGENT,
+    } as RequestInit & { dispatcher: Agent });
   } catch (error) {
     const cause = error instanceof Error && error.cause instanceof Error
       ? ` (${error.cause.message})`
