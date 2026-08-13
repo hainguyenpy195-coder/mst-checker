@@ -285,7 +285,7 @@ button:not(:disabled):active { transform: translateY(1px); }
 .danger-button:disabled { cursor: wait; opacity: 0.72; }
 
 /* Mobile-only views are mounted with the dashboard so they can reuse its state. */
-.mobile-dashboard, .mobile-bottom-nav, .mobile-activity-list { display: none; }
+.mobile-dashboard, .mobile-activity-list { display: none; }
 
 @media (max-width: 1120px) {
   .dashboard-frame { grid-template-columns: 220px minmax(0, 1fr); }
@@ -300,15 +300,10 @@ button:not(:disabled):active { transform: translateY(1px); }
   .header-app-identity > div > span { display: none; }
   .header-app-identity strong { font-size: 16px; }
   .user-chip { max-width: 155px; }
-  .dashboard-content { padding: 18px 14px calc(94px + env(safe-area-inset-bottom)); }
+  .dashboard-content { padding: 18px 14px calc(32px + env(safe-area-inset-bottom)); }
   .page-heading-row { align-items: flex-start; flex-direction: column; }
   .desktop-page-heading, .desktop-data-table { display: none; }
   .mobile-dashboard { display: block; }
-  .mobile-bottom-nav { position: fixed; z-index: 40; right: 0; bottom: 0; left: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); min-height: calc(64px + env(safe-area-inset-bottom)); padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--line); box-shadow: 0 -8px 20px rgba(37, 57, 84, 0.11); }
-  .mobile-nav-link { display: grid; min-width: 0; min-height: 52px; place-items: center; gap: 3px; padding: 4px; color: var(--muted); background: transparent; border: 0; border-radius: 10px; font-size: 10px; font-weight: 650; line-height: 1.15; }
-  .mobile-nav-link svg { transition: color 150ms ease, transform 150ms ease; }
-  .mobile-nav-link-active { color: var(--accent-dark); background: var(--accent-soft); }
-  .mobile-nav-link-active svg { transform: translateY(-1px); }
   .mobile-lookup-card { display: grid; gap: 15px; padding: 18px; background: var(--surface); border: 1px solid var(--accent-border); border-radius: 18px; box-shadow: var(--shadow-soft); }
   .mobile-section-eyebrow { display: block; color: var(--accent-dark); font-size: 10px; font-weight: 760; letter-spacing: 0.1em; }
   .mobile-lookup-card h2, .mobile-lookup-results h2 { margin: 6px 0 0; color: var(--ink); font-size: 20px; font-weight: 730; letter-spacing: -0.03em; }

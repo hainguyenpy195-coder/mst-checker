@@ -885,29 +885,6 @@ export default function Dashboard({ username }: DashboardProps) {
           </section>
           </> : null}
         </main>
-        <nav className="mobile-bottom-nav" aria-label="Điều hướng di động">
-          {navItems.map(({ label, icon: Icon, mode }) => (
-            <button
-              className={viewMode === mode ? "mobile-nav-link mobile-nav-link-active" : "mobile-nav-link"}
-              key={label}
-              type="button"
-              aria-current={viewMode === mode ? "page" : undefined}
-              onClick={() => navigateToView(mode)}
-            >
-              <Icon size={19} weight="regular" />
-              <span>{label}</span>
-            </button>
-          ))}
-          <button
-            className={viewMode === "settings" ? "mobile-nav-link mobile-nav-link-active" : "mobile-nav-link"}
-            type="button"
-            aria-current={viewMode === "settings" ? "page" : undefined}
-            onClick={() => navigateToView("settings")}
-          >
-            <Gear size={19} weight="regular" />
-            <span>Cấu hình</span>
-          </button>
-        </nav>
       </div>
       {manualLookup ? <div className="confirm-backdrop">
         <section className="confirm-dialog manual-lookup-dialog" role="dialog" aria-modal="true" aria-labelledby="manual-lookup-dialog-title" aria-describedby="manual-lookup-dialog-description">
