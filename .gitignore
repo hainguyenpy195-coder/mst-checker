@@ -1,0 +1,26 @@
+# Dependencies and build output
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Real source workbook and generated seed data contain confidential taxpayer data.
+*.xlsx
+*.xls
+supabase/seed.sql
+
+# Local logs and editor files
+*.log
+.DS_Store
+.vscode/
+.idea/
+
+# OS temporary files
+Thumbs.db
+desktop.ini
