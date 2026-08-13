@@ -98,6 +98,11 @@ function statusLabel(taxpayer: TaxpayerDetail | null) {
   return taxpayer.status;
 }
 
+function endpointUpdatedAtNote(taxpayer: TaxpayerDetail | null) {
+  if (!taxpayer?.source_updated_at) return null;
+  return `Dữ liệu endpoint (updatedAt): ${formatDate(taxpayer.source_updated_at)}`;
+}
+
 function statusClass(taxpayer: TaxpayerDetail | null) {
   if (taxpayer?.status_group === "active") return "status-badge status-success";
   if (taxpayer?.status_group === "inactive") return "status-badge status-danger";
@@ -610,11 +615,12 @@ export default function Dashboard({ username }: DashboardProps) {
             {error ? <div className="table-alert"><WarningCircle size={18} /> {error}</div> : null}
             <div className="table-scroll">
               <table className="data-table">
-                <thead><tr><th className="col-expand" /><th>Mã số thuế</th><th>Tên người nộp thuế</th><th>Năm nguồn</th><th>Tình trạng</th><th title="Lần cập nhật mới nhất">Cập nhật</th><th>Ghi chú</th></tr></thead>
+                <thead><tr><th className="col-expand" /><th>Mã số thuế</th><th>Tên người nộp thuế</th><th>Năm nguồn</th><th>Tình trạng</th><th title="Lần hệ thống tra cứu endpoint gần nhất">Tra cứu lúc</th><th>Ghi chú</th></tr></thead>
                 <tbody>
                   {isLoading ? <TableSkeleton /> : filteredRows.length === 0 ? <tr><td colSpan={7}><div className="table-empty"><FileText size={26} /><strong>Chưa có dữ liệu để hiển thị</strong><span>Dữ liệu sẽ xuất hiện sau khi migration và seed Supabase hoàn tất.</span></div></td></tr> : pagedRows.map((row) => {
                     const detail = row.taxpayer;
                     const isExpanded = expandedRow === row.id;
+                    const note = [row.source_note, endpointUpdatedAtNote(detail), detail?.last_error].filter(Boolean).join(" | ");
                     return <Fragment key={row.id}>
                       <tr key={row.id} className={`data-row ${isExpanded ? "data-row-expanded" : ""}`} onClick={() => setExpandedRow(isExpanded ? null : row.id)}>
                         <td className="col-expand"><CaretRight size={16} className={isExpanded ? "caret-open" : ""} /></td>
@@ -623,7 +629,7 @@ export default function Dashboard({ username }: DashboardProps) {
                         <td><span className="sheet-label">{row.source_sheet}</span></td>
                         <td><span className={statusClass(detail)}>{statusLabel(detail)}</span></td>
                         <td className="date-cell">{formatDate(detail?.last_checked_at ?? null)}</td>
-                        <td className="note-cell">{[row.source_note, detail?.last_error].filter(Boolean).join(" | ")}</td>
+                        <td className="note-cell">{note}</td>
                       </tr>
                       {isExpanded ? <tr key={`${row.id}-detail`} className="detail-row"><td colSpan={7}><DetailPanel row={row} /></td></tr> : null}
                     </Fragment>;
@@ -670,7 +676,7 @@ function ActivitySkeleton() {
 
 function DetailPanel({ row }: { row: TaxpayerRow }) {
   const detail = row.taxpayer;
-  return <div className="detail-panel"><div className="detail-title"><div><span>CHI TIẾT MST</span><h3>{detail?.name ?? row.source_vendor_name ?? "Chưa có tên"}</h3></div><span className={statusClass(detail)}>{statusLabel(detail)}</span></div><div className="detail-grid"><DetailItem label="Mã số thuế" value={row.tax_code} mono /><DetailItem label="Năm theo dõi" value={row.source_year ?? row.source_sheet} /><DetailItem label="Loại tổ chức" value={detail?.org_type} /><DetailItem label="Cơ quan thuế" value={detail?.tax_department} /><DetailItem label="Địa chỉ" value={detail?.address} wide /><DetailItem label="Thời điểm nguồn cập nhật" value={formatDate(detail?.source_updated_at ?? null)} /><DetailItem label="Tra cứu lần trước" value={formatDate(detail?.previous_checked_at ?? null)} /><DetailItem label="Cập nhật lúc" value={formatDate(detail?.last_checked_at ?? null)} /></div>{detail?.last_error ? <div className="detail-error"><WarningCircle size={16} /> {detail.last_error}</div> : null}</div>;
+  return <div className="detail-panel"><div className="detail-title"><div><span>CHI TIẾT MST</span><h3>{detail?.name ?? row.source_vendor_name ?? "Chưa có tên"}</h3></div><span className={statusClass(detail)}>{statusLabel(detail)}</span></div><div className="detail-grid"><DetailItem label="Mã số thuế" value={row.tax_code} mono /><DetailItem label="Năm theo dõi" value={row.source_year ?? row.source_sheet} /><DetailItem label="Loại tổ chức" value={detail?.org_type} /><DetailItem label="Cơ quan thuế" value={detail?.tax_department} /><DetailItem label="Địa chỉ" value={detail?.address} wide /><DetailItem label="Dữ liệu lấy từ cục thuế lúc" value={formatDate(detail?.source_updated_at ?? null)} /><DetailItem label="Tra cứu lần trước" value={formatDate(detail?.previous_checked_at ?? null)} /><DetailItem label="Tra cứu lúc" value={formatDate(detail?.last_checked_at ?? null)} /></div>{detail?.last_error ? <div className="detail-error"><WarningCircle size={16} /> {detail.last_error}</div> : null}</div>;
 }
 
 function DetailItem({ label, value, mono = false, wide = false }: { label: string; value: string | null | undefined; mono?: boolean; wide?: boolean }) {
