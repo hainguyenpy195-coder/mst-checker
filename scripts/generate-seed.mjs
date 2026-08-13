@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import XLSX from "xlsx";
+import ExcelJS from "exceljs";
 
 const TARGET_SHEETS = ["2023", "2024", "2025", "T2-26"];
 const DEFAULT_INPUT = "2023, 2024, 2025, T2-26 (Trụ sở chính).xlsx";
@@ -14,6 +14,21 @@ function getArg(name, fallback) {
 
 function text(value) {
   return value == null ? "" : String(value).trim();
+}
+
+function cellText(cell) {
+  if (cell == null || typeof cell !== "object" || !Object.prototype.hasOwnProperty.call(cell, "value")) {
+    return text(cell);
+  }
+  const value = cell?.value;
+  if (value == null) return "";
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "object") {
+    if (Array.isArray(value.richText)) return value.richText.map((item) => item.text ?? "").join("");
+    if (value.result != null) return text(value.result);
+    if (value.text != null) return text(value.text);
+  }
+  return text(value);
 }
 
 function normalized(value) {
@@ -78,7 +93,10 @@ function findColumn(header, patterns) {
 }
 
 function parseSheet(sheetName, worksheet) {
-  const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null, raw: false });
+  const rows = [];
+  worksheet.eachRow({ includeEmpty: true }, (row) => {
+    rows.push(row.values.slice(1).map((cell) => cellText(cell)));
+  });
   const headerIndex = findHeaderIndex(rows);
 
   if (headerIndex < 0) {
@@ -130,13 +148,14 @@ function parseSheet(sheetName, worksheet) {
   return { records, issues };
 }
 
-function createSql(inputPath, outputPath) {
-  const workbook = XLSX.readFile(inputPath, { cellDates: false, raw: false });
+async function createSql(inputPath, outputPath) {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(inputPath);
   const allRecords = [];
   const allIssues = [];
 
   for (const sheetName of TARGET_SHEETS) {
-    const worksheet = workbook.Sheets[sheetName];
+    const worksheet = workbook.getWorksheet(sheetName);
     if (!worksheet) {
       allIssues.push({ sourceSheet: sheetName, sourceRow: null, rawTaxCode: null, issueType: "sheet_not_found" });
       continue;
@@ -199,4 +218,4 @@ if (!fs.existsSync(inputPath)) {
   process.exit(1);
 }
 
-createSql(inputPath, outputPath);
+await createSql(inputPath, outputPath);

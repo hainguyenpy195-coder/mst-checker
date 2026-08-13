@@ -171,8 +171,8 @@ export default function Dashboard({ userEmail, profile }: DashboardProps) {
     setIsExporting(true);
     setError(null);
     try {
-      const XLSX = await import("xlsx");
-      const workbook = XLSX.utils.book_new();
+      const ExcelJS = await import("exceljs");
+      const workbook = new ExcelJS.Workbook();
       const columns = [
         "STT",
         "Tên người bán",
@@ -187,22 +187,44 @@ export default function Dashboard({ userEmail, profile }: DashboardProps) {
         const response = await fetch(`/api/taxpayers?sheet=${encodeURIComponent(sheetName)}&limit=2500`, { cache: "no-store" });
         const payload = await response.json() as { rows?: TaxpayerRow[]; error?: string };
         if (!response.ok) throw new Error(payload.error ?? `Không thể tải sheet ${sheetName}.`);
-        const sheetRows = payload.rows ?? [];
-        const values = sheetRows.map((row, index) => [
-          index + 1,
-          escapeExportText(row.source_vendor_name ?? row.taxpayer?.name),
-          row.tax_code,
-          escapeExportText(row.taxpayer?.status),
-          "",
-          escapeExportText(row.taxpayer?.last_checked_at ? formatDate(row.taxpayer.last_checked_at) : null),
-          escapeExportText([row.source_note, row.taxpayer?.last_error].filter(Boolean).join(" | ")),
-        ]);
-        const worksheet = XLSX.utils.aoa_to_sheet([columns, ...values]);
-        worksheet["!cols"] = [{ wch: 7 }, { wch: 42 }, { wch: 17 }, { wch: 34 }, { wch: 24 }, { wch: 24 }, { wch: 54 }];
-        XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+        const worksheet = workbook.addWorksheet(sheetName);
+        worksheet.columns = columns.map((header, index) => ({
+          header,
+          key: `column_${index}`,
+          width: [7, 42, 17, 34, 24, 24, 54][index],
+        }));
+        worksheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+        worksheet.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0B83C6" } };
+        worksheet.getRow(1).alignment = { vertical: "middle", wrapText: true };
+        worksheet.views = [{ state: "frozen", ySplit: 1 }];
+        (payload.rows ?? []).forEach((row, index) => {
+          const values = [
+            index + 1,
+            escapeExportText(row.source_vendor_name ?? row.taxpayer?.name),
+            row.tax_code,
+            escapeExportText(row.taxpayer?.status),
+            "",
+            escapeExportText(row.taxpayer?.last_checked_at ? formatDate(row.taxpayer.last_checked_at) : null),
+            escapeExportText([row.source_note, row.taxpayer?.last_error].filter(Boolean).join(" | ")),
+          ];
+          worksheet.addRow(values);
+        });
+        worksheet.eachRow((row, index) => {
+          row.alignment = { vertical: "top", wrapText: true };
+          if (index > 1 && index % 2 === 0) {
+            row.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF8FAFC" } };
+          }
+        });
       }
 
-      XLSX.writeFile(workbook, `TAX-ID-Checker-${new Date().toISOString().slice(0, 10)}.xlsx`);
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const downloadUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = downloadUrl;
+      anchor.download = `TAX-ID-Checker-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      anchor.click();
+      URL.revokeObjectURL(downloadUrl);
     } catch (exportError) {
       setError(exportError instanceof Error ? exportError.message : "Không thể xuất Excel.");
     } finally {
