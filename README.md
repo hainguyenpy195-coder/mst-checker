@@ -12,7 +12,8 @@ Dữ liệu thật được nạp trực tiếp vào project Supabase riêng b�
 
 ```powershell
 Copy-Item .env.example .env.local
-# Điền NEXT_PUBLIC_SUPABASE_URL và NEXT_PUBLIC_SUPABASE_ANON_KEY
+# Điền SUPABASE_URL, SUPABASE_SECRET_KEY,
+# APP_LOGIN_USERNAME, APP_LOGIN_PASSWORD và APP_SESSION_SECRET
 npm install
 npm run dev
 ```
@@ -22,19 +23,36 @@ Mở `http://localhost:3000`.
 ## Supabase
 
 1. Tạo project Supabase.
-2. Chạy migration `supabase/migrations/202608130001_initial_schema.sql` trong SQL Editor.
-3. Cấu hình Google OAuth trong Supabase Auth và callback URL:
-   `https://<domain>/auth/callback`
-4. Tạo seed cục bộ từ workbook:
+2. Chạy lần lượt năm migration trong SQL Editor:
+  - `supabase/migrations/202608130001_initial_schema.sql`
+  - `supabase/migrations/202608130002_app_login_and_yearly_sources.sql`
+  - `supabase/migrations/202608130003_recurring_refresh_schedule.sql`
+  - `supabase/migrations/202608130004_targeted_and_monthly_refresh.sql`
+  - `supabase/migrations/202608130005_prioritize_refresh_retries.sql`
+3. Tạo seed cục bộ từ workbook:
 
    ```powershell
    npm run generate:seed -- --input ".\2023, 2024, 2025, T2-26 (Trụ sở chính).xlsx"
    ```
 
-5. Mở file `supabase/seed.sql` cục bộ, kiểm tra số liệu rồi chạy trong SQL Editor. File này bị `.gitignore` để tránh đưa dữ liệu thật lên GitHub public.
-6. Thiết lập secrets cho Edge Function bằng Supabase CLI hoặc Dashboard:
-   `XINVOICE_CLIENT_ID`, `XINVOICE_API_KEY`, `REFRESH_WORKER_SECRET`.
-7. Triển khai Edge Function `supabase/functions/xinvoice-refresh` và cấu hình cron theo `supabase/cron.sql`.
+4. Mở file `supabase/seed.sql` cục bộ, kiểm tra số liệu rồi chạy trong SQL Editor. Script lưu sheet `T2-26` thành năm `2026` và đưa các MST hợp lệ vào `refresh_queue`. File này bị `.gitignore` để tránh đưa dữ liệu thật lên GitHub public.
+5. Thiết lập secret nội bộ cho Edge Function bằng Supabase CLI hoặc Dashboard:
+   `REFRESH_WORKER_SECRET`. Endpoint tra cứu MST công khai của XInvoice không
+   yêu cầu `client-id` hoặc `api-key`.
+6. Triển khai Edge Function `supabase/functions/xinvoice-refresh` và cấu hình cron theo `supabase/cron.sql`. Lần đầu, các MST đã có trong `refresh_queue` được drain tối đa 10 MST mỗi phút. Về sau, chỉ ngày 1 hàng tháng lúc 12:00 (giờ Việt Nam) mới enqueue toàn bộ MST; worker drain xử lý hàng đợi theo giới hạn tốc độ của API. Nút cập nhật bên cạnh từng MST dùng targeted refresh cho đúng một mã.
+
+Supabase Auth không được sử dụng trong phiên bản nội bộ này. Vercel kiểm tra
+tài khoản ứng dụng trong các biến `APP_LOGIN_*` rồi cấp cookie phiên httpOnly.
+Trình duyệt chỉ gọi API route của Next.js; secret key Supabase chỉ tồn tại ở
+server.
+
+Các chức năng chính gồm bảng tổng hợp theo một MST duy nhất, tìm nhanh theo MST
+hoặc tên, tab năm động, thêm MST theo năm với cảnh báo trùng, cập nhật thủ công
+từng MST và xuất workbook Excel nhiều sheet với các cột A–H tương thích mẫu.
+Cột D `Mặt hàng` được giữ là cột vật lý trống và ẩn; dữ liệu ứng dụng tập trung
+vào STT, tên, MST, tình trạng, hai thời điểm tra cứu và ghi chú. XInvoice là
+nguồn chính; VietQR được dùng làm nguồn phụ khi XInvoice tạm lỗi hoặc bị giới
+hạn, đồng thời không xoá các trường mà VietQR không cung cấp.
 
 ## Kiểm tra
 

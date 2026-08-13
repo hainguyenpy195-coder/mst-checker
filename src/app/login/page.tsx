@@ -1,7 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { FormEvent, useState } from "react";
 
 function AttechLogo() {
   return <div className="attech-logo attech-logo-login"><span className="attech-a">A</span><span className="attech-tech">TTECH</span></div>;
@@ -11,19 +10,27 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function signInWithGoogle() {
+  async function signIn(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     setIsLoading(true);
     setError(null);
-    const supabase = createClient();
-    const { error: authError } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
+    const formData = new FormData(event.currentTarget);
+    const response = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        username: formData.get("username"),
+        password: formData.get("password"),
+      }),
     });
-    if (authError) {
-      setError(authError.message);
+    const payload = await response.json() as { error?: string };
+    if (!response.ok) {
+      setError(payload.error ?? "Không thể đăng nhập.");
       setIsLoading(false);
+      return;
     }
+    window.location.href = "/";
   }
 
-  return <main className="login-shell"><section className="login-card" aria-labelledby="login-title"><AttechLogo /><p className="login-product">TAX ID Cheker <span>v1.0.0 beta</span></p><h1 id="login-title">Đăng nhập hệ thống</h1><p className="login-description">Tra cứu và theo dõi tình trạng hoạt động mã số thuế trong danh mục ATTECH.</p><button className="login-google" type="button" onClick={signInWithGoogle} disabled={isLoading}><span className="google-letter">G</span>{isLoading ? "Đang kết nối Google..." : "Tiếp tục với Google"}</button>{error ? <p className="form-error">Không thể đăng nhập: {error}</p> : null}<p className="login-note">Tài khoản mới cần được quản trị viên phê duyệt.</p></section></main>;
+  return <main className="login-shell"><section className="login-card" aria-labelledby="login-title"><div className="login-brand"><AttechLogo /><p className="login-product">TAX ID Checker <span>v1.0.0 beta</span></p></div><h1 id="login-title">Đăng nhập hệ thống</h1><p className="login-description">Tra cứu và theo dõi tình trạng hoạt động mã số thuế trong danh mục nhà cung ứng ATTECH.</p><form className="login-form" onSubmit={signIn}><label htmlFor="username">Tài khoản</label><input id="username" name="username" autoComplete="username" required placeholder="Nhập tên tài khoản" /><label htmlFor="password">Mật khẩu</label><input id="password" name="password" type="password" autoComplete="current-password" required placeholder="Nhập mật khẩu" /><button className="login-google" type="submit" disabled={isLoading}>{isLoading ? "Đang xác thực..." : "Đăng nhập"}</button></form>{error ? <p className="form-error">{error}</p> : null}<p className="login-note">Tài khoản nội bộ Trung tâm Bảo đảm kỹ thuật</p></section></main>;
 }

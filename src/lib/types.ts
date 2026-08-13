@@ -1,11 +1,3 @@
-export type Profile = {
-  id: string;
-  email: string | null;
-  display_name: string | null;
-  role: "admin" | "user";
-  approval_status: "pending" | "approved" | "blocked";
-};
-
 export type Taxpayer = {
   tax_code: string;
   name: string | null;
@@ -15,6 +7,7 @@ export type Taxpayer = {
   status: string | null;
   status_group: string | null;
   source_updated_at: string | null;
+  previous_checked_at: string | null;
   last_checked_at: string | null;
   status_changed_at: string | null;
   last_error: string | null;

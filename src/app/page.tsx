@@ -1,30 +1,18 @@
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import Dashboard from "@/components/dashboard";
-import { createClient } from "@/lib/supabase/server";
-import type { Profile } from "@/lib/types";
+import { APP_SESSION_COOKIE, verifySessionToken } from "@/lib/app-auth";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/login");
-  }
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("id, email, display_name, role, approval_status")
-    .eq("id", user.id)
-    .maybeSingle<Profile>();
+  const cookieStore = await cookies();
+  const session = await verifySessionToken(cookieStore.get(APP_SESSION_COOKIE)?.value);
+  if (!session) redirect("/login");
 
   return (
     <Dashboard
-      userEmail={user.email ?? profile?.email ?? ""}
-      profile={profile}
+      username={session.username}
     />
   );
 }

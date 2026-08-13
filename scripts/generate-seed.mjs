@@ -3,7 +3,14 @@ import path from "node:path";
 import process from "node:process";
 import ExcelJS from "exceljs";
 
-const TARGET_SHEETS = ["2023", "2024", "2025", "T2-26"];
+const TARGET_SHEETS = [
+  { workbookNames: ["2023"], dbYear: "2023" },
+  { workbookNames: ["2024"], dbYear: "2024" },
+  { workbookNames: ["2025"], dbYear: "2025" },
+  // The source workbook is labelled T2-26/T2-2026, but the application
+  // intentionally stores and displays it as year 2026.
+  { workbookNames: ["T2-26", "T2-2026"], dbYear: "2026" },
+];
 const DEFAULT_INPUT = "2023, 2024, 2025, T2-26 (Trụ sở chính).xlsx";
 const DEFAULT_OUTPUT = path.join("supabase", "seed.sql");
 
@@ -53,11 +60,28 @@ function isoDate(value) {
   const match = raw.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
   if (match) {
     const [, day, month, year] = match;
-    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T00:00:00+07:00`;
+    const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+    return isUsableDate(date)
+      ? `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T00:00:00+07:00`
+      : null;
+  }
+
+  // ExcelJS can expose date cells as Excel serial numbers when the source
+  // workbook stores the value as a number instead of a JavaScript Date.
+  const serial = Number(raw);
+  if (Number.isFinite(serial) && serial > 0 && serial < 100000) {
+    const date = new Date(Date.UTC(1899, 11, 30) + serial * 24 * 60 * 60 * 1000);
+    return isUsableDate(date) ? date.toISOString() : null;
   }
 
   const date = new Date(raw);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  return isUsableDate(date) ? date.toISOString() : null;
+}
+
+function isUsableDate(date) {
+  if (Number.isNaN(date.getTime())) return false;
+  const year = date.getUTCFullYear();
+  return year >= 1900 && year <= 2100;
 }
 
 function normalizeTaxCode(value) {
@@ -92,7 +116,7 @@ function findColumn(header, patterns) {
   });
 }
 
-function parseSheet(sheetName, worksheet) {
+function parseSheet(dbYear, worksheet) {
   const rows = [];
   worksheet.eachRow({ includeEmpty: true }, (row) => {
     rows.push(row.values.slice(1).map((cell) => cellText(cell)));
@@ -100,7 +124,7 @@ function parseSheet(sheetName, worksheet) {
   const headerIndex = findHeaderIndex(rows);
 
   if (headerIndex < 0) {
-    return { records: [], issues: [{ sourceSheet: sheetName, sourceRow: null, rawTaxCode: null, issueType: "header_not_found" }] };
+    return { records: [], issues: [{ sourceSheet: dbYear, sourceRow: null, rawTaxCode: null, issueType: "header_not_found" }] };
   }
 
   const header = rows[headerIndex];
@@ -112,7 +136,7 @@ function parseSheet(sheetName, worksheet) {
   const noteColumn = findColumn(header, [/ghi chu/, /note/]);
 
   if (taxCodeColumn < 0) {
-    return { records: [], issues: [{ sourceSheet: sheetName, sourceRow: headerIndex + 1, rawTaxCode: null, issueType: "tax_code_column_not_found" }] };
+    return { records: [], issues: [{ sourceSheet: dbYear, sourceRow: headerIndex + 1, rawTaxCode: null, issueType: "tax_code_column_not_found" }] };
   }
 
   const records = [];
@@ -128,14 +152,14 @@ function parseSheet(sheetName, worksheet) {
     if (!taxCode) return;
 
     if (!/^(?:\d{10}|\d{12}|\d{10}-\d{3})$/.test(taxCode)) {
-      issues.push({ sourceSheet: sheetName, sourceRow, rawTaxCode, suggestedTaxCode: suggestedTaxCode(taxCode), issueType: "invalid_tax_code" });
+      issues.push({ sourceSheet: dbYear, sourceRow, rawTaxCode, suggestedTaxCode: suggestedTaxCode(taxCode), issueType: "invalid_tax_code" });
       return;
     }
 
     records.push({
       taxCode,
-      sourceSheet: sheetName,
-      sourceYear: sheetName,
+      sourceSheet: dbYear,
+      sourceYear: dbYear,
       sourceRow,
       vendorName,
       orgType: orgTypeColumn >= 0 ? text(row[orgTypeColumn]) : "",
@@ -154,13 +178,14 @@ async function createSql(inputPath, outputPath) {
   const allRecords = [];
   const allIssues = [];
 
-  for (const sheetName of TARGET_SHEETS) {
-    const worksheet = workbook.getWorksheet(sheetName);
+  for (const target of TARGET_SHEETS) {
+    const workbookSheetName = target.workbookNames.find((name) => workbook.getWorksheet(name));
+    const worksheet = workbookSheetName ? workbook.getWorksheet(workbookSheetName) : undefined;
     if (!worksheet) {
-      allIssues.push({ sourceSheet: sheetName, sourceRow: null, rawTaxCode: null, issueType: "sheet_not_found" });
+      allIssues.push({ sourceSheet: target.dbYear, sourceRow: null, rawTaxCode: null, issueType: "sheet_not_found" });
       continue;
     }
-    const parsed = parseSheet(sheetName, worksheet);
+    const parsed = parseSheet(target.dbYear, worksheet);
     allRecords.push(...parsed.records);
     allIssues.push(...parsed.issues);
   }
@@ -184,7 +209,7 @@ async function createSql(inputPath, outputPath) {
     const status = record.status || null;
     const checkedAt = record.checkedAt ? `'${record.checkedAt}'` : "null";
     lines.push(
-      `insert into public.taxpayers (tax_code, name, org_type, status, status_group, last_checked_at, next_check_at) values (${sqlText(record.taxCode)}, ${sqlText(record.vendorName)}, ${sqlText(record.orgType)}, ${sqlText(status)}, ${sqlText(classifyStatus(status))}, ${checkedAt}, now() + interval '24 hours') on conflict (tax_code) do update set name = excluded.name, org_type = excluded.org_type, status = coalesce(excluded.status, public.taxpayers.status), status_group = case when excluded.status is null then public.taxpayers.status_group else excluded.status_group end, last_checked_at = coalesce(excluded.last_checked_at, public.taxpayers.last_checked_at), updated_at = now();`,
+      `insert into public.taxpayers (tax_code, name, org_type, status, status_group, last_checked_at, next_check_at) values (${sqlText(record.taxCode)}, ${sqlText(record.vendorName)}, ${sqlText(record.orgType)}, ${sqlText(status)}, ${sqlText(classifyStatus(status))}, ${checkedAt}, now()) on conflict (tax_code) do update set name = coalesce(excluded.name, public.taxpayers.name), org_type = coalesce(excluded.org_type, public.taxpayers.org_type), status = coalesce(excluded.status, public.taxpayers.status), status_group = case when excluded.status is null then public.taxpayers.status_group else excluded.status_group end, last_checked_at = coalesce(excluded.last_checked_at, public.taxpayers.last_checked_at), next_check_at = now(), updated_at = now();`,
     );
   }
 
@@ -197,6 +222,14 @@ async function createSql(inputPath, outputPath) {
   for (const issue of allIssues) {
     lines.push(
       `insert into public.import_issues (source_sheet, source_row, raw_tax_code, suggested_tax_code, issue_type, note) values (${sqlText(issue.sourceSheet)}, ${issue.sourceRow ?? "null"}, ${sqlText(issue.rawTaxCode)}, ${sqlText(issue.suggestedTaxCode)}, ${sqlText(issue.issueType)}, 'Review before adding to the taxpayer directory.');`,
+    );
+  }
+
+  // Every valid unique MST is queued for the first XInvoice refresh. The
+  // worker claims small batches and applies its own retry/backoff policy.
+  for (const record of unique.values()) {
+    lines.push(
+      `insert into public.refresh_queue (tax_code, priority, state, run_after) values (${sqlText(record.taxCode)}, 0, 'queued', now()) on conflict (tax_code) do update set state = 'queued', run_after = now(), last_error = null, updated_at = now();`,
     );
   }
 

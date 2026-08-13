@@ -1,18 +1,20 @@
 # Kế hoạch xây dựng hệ thống tra cứu mã số thuế
 
-> Trạng thái: Bản kế hoạch đề xuất, chờ phê duyệt trước khi triển khai  
-> Ngày lập: 13/08/2026  
-> Nền tảng dự kiến: Next.js trên Vercel + PostgreSQL/Auth/Edge Functions trên Supabase
+> Trạng thái: Đã được phê duyệt, đang triển khai theo mô hình đăng nhập nội bộ
+> Ngày lập: 13/08/2026
+> Nền tảng: Next.js trên Vercel + PostgreSQL/Cron/Edge Functions trên Supabase
 
 ## 1. Mục tiêu
 
 Xây dựng một ứng dụng web nội bộ cho phép người dùng đã được cấp quyền:
 
-- Đăng nhập bằng tài khoản do Supabase Auth quản lý.
+- Đăng nhập nội bộ bằng một tài khoản ứng dụng do Vercel Environment Variables quản lý.
 - Nhập mã số thuế (MST) và nhận kết quả gần như tức thời từ Supabase PostgreSQL.
 - Xem tình trạng hoạt động, tên người nộp thuế, địa chỉ, cơ quan thuế và thời điểm tra cứu gần nhất.
 - Được thông báo rõ khi dữ liệu đang cũ, đang cập nhật hoặc gặp lỗi từ XInvoice.
 - Tự động cập nhật dữ liệu nền từ API XInvoice mà không yêu cầu người dùng tải Excel lên.
+- Xem dữ liệu tổng hợp, lọc nhanh, xem theo năm và thêm MST vào năm theo dõi.
+- Xuất workbook Excel nhiều sheet với các cột cập nhật giống file nghiệp vụ.
 - Lưu lịch sử khi tình trạng hoạt động của MST thực sự thay đổi.
 
 Hệ thống mới chuyển quy trình từ xử lý từng file Excel sang một cơ sở dữ liệu tập trung. Chức năng xuất Excel cập nhật lại từ database sẽ được xem là hạng mục mở rộng nếu vẫn cần dùng cho nghiệp vụ.
@@ -23,19 +25,17 @@ Hệ thống mới chuyển quy trình từ xử lý từng file Excel sang mộ
 
 - Next.js App Router và TypeScript.
 - Giao diện tra cứu chuyên nghiệp, ưu tiên phong cách Windows 11 và hiển thị tốt trên máy tính.
-- Supabase Auth với Google là nhà cung cấp đăng nhập đầu tiên.
-- Cơ chế phê duyệt tài khoản hoặc giới hạn tên miền email.
+- Đăng nhập nội bộ qua cookie phiên httpOnly được ký ở Vercel.
 - Nạp dữ liệu Excel ban đầu bằng SQL chạy một lần.
 - Tra cứu chính xác theo MST đã có trong database.
 - Hàng đợi cập nhật XInvoice theo lô và giới hạn tốc độ.
 - Lưu trạng thái hiện tại, thời điểm tra cứu, lỗi gần nhất và lịch sử thay đổi.
-- Trang quản trị tối thiểu để xem tài khoản, tiến độ cập nhật và lỗi.
-- Nhật ký tra cứu phục vụ kiểm tra vận hành.
+- API server-side bảo vệ secret key Supabase khỏi trình duyệt.
 
 ### Chưa bao gồm trong MVP
 
-- Cho người dùng tự tải Excel lên.
-- Cho phép đăng ký xong là sử dụng ngay mà không cần phê duyệt.
+- Supabase Auth/OAuth và quy trình phê duyệt nhiều tài khoản.
+- Cho người dùng tự tải Excel lên qua trình duyệt.
 - Tự động thêm mọi MST chưa có trong danh sách.
 - Xoay proxy hoặc né giới hạn tốc độ của XInvoice.
 - Báo cáo thống kê nâng cao.
@@ -53,6 +53,8 @@ Các sheet nghiệp vụ cần nạp:
 - `2024`
 - `2025`
 - `T2-26`
+
+Trong database, `T2-26` (hoặc `T2-2026`) được chuẩn hóa thành năm `2026`.
 
 Kết quả kiểm tra sơ bộ:
 
@@ -79,10 +81,10 @@ Người dùng
     │
     ▼
 Vercel / Next.js
-    ├── Giao diện đăng nhập và tra cứu
-    ├── Xác minh Supabase Auth session
-    ├── Kiểm tra quyền người dùng
-    └── API tra cứu chính xác theo MST
+    ├── Giao diện đăng nhập nội bộ và dashboard
+    ├── Xác minh cookie phiên httpOnly
+    ├── API server-side đọc/ghi Supabase
+    └── Xuất Excel theo năm
               │
               ▼
        Supabase PostgreSQL
@@ -107,12 +109,11 @@ Supabase Edge Function
 
 | Thành phần | Trách nhiệm |
 |---|---|
-| Vercel | Phục vụ Next.js, giao diện, callback đăng nhập và API tra cứu cho người dùng |
-| Supabase Auth | Xác thực Google/Microsoft/Facebook hoặc provider khác |
-| Supabase PostgreSQL | Nguồn dữ liệu trung tâm và phân quyền dữ liệu |
+| Vercel | Phục vụ Next.js, đăng nhập nội bộ, giao diện, API tra cứu/thêm MST/xuất Excel |
+| Supabase PostgreSQL | Nguồn dữ liệu trung tâm; Vercel server dùng secret key |
 | Supabase Cron | Lập lịch xử lý hàng đợi |
 | Supabase Edge Function | Gọi XInvoice và cập nhật database |
-| XInvoice | Nguồn dữ liệu tình trạng người nộp thuế |
+| XInvoice | Nguồn dữ liệu tình trạng người nộp thuế qua endpoint công khai |
 
 ## 5. Mô hình dữ liệu dự kiến
 
@@ -130,6 +131,7 @@ Các trường chính:
 - `status text`
 - `status_group text`
 - `source_updated_at timestamptz`
+- `previous_checked_at timestamptz`
 - `last_checked_at timestamptz`
 - `status_changed_at timestamptz`
 - `last_error text`
@@ -180,6 +182,9 @@ Không lưu một dòng lịch sử cho mỗi lần kiểm tra thành công nế
 
 ### `profiles`
 
+Bảng cũ được giữ lại để không phá migration hiện hữu nhưng không được sử dụng
+trong luồng đăng nhập nội bộ hiện tại.
+
 - `id uuid`, liên kết `auth.users.id`
 - `email text`
 - `display_name text`
@@ -228,24 +233,30 @@ Quy tắc cập nhật:
 
 ## 7. Luồng tra cứu của người dùng
 
-1. Người dùng đăng nhập bằng Google hoặc provider đã được cấu hình.
-2. Backend xác minh session và kiểm tra `profiles.approval_status = 'approved'`.
+1. Người dùng đăng nhập bằng tài khoản nội bộ đã cấu hình trong Vercel.
+2. Next.js xác minh cookie phiên httpOnly đã ký.
 3. Người dùng nhập MST.
 4. Hệ thống chuẩn hóa khoảng trắng và dấu phân cách, sau đó kiểm tra định dạng.
 5. Next.js API Route truy vấn chính xác một MST trong Supabase.
 6. Giao diện trả ngay dữ liệu hiện có cùng `last_checked_at`.
 7. Nếu dữ liệu đã quá thời hạn, hệ thống đưa MST vào `refresh_queue` với độ ưu tiên cao.
 8. Giao diện hiển thị “Đang cập nhật” nhưng vẫn giữ kết quả gần nhất.
-9. Khi có dữ liệu mới, giao diện tải lại hoặc nhận thông báo cập nhật.
+9. Khi có dữ liệu mới, giao diện tải lại hoặc người dùng bấm làm mới.
 
-Mặc định đề xuất cho MVP: dữ liệu được xem là cũ sau 24 giờ.
+Theo yêu cầu vận hành, dữ liệu chỉ được enqueue toàn bộ vào 12:00 ngày 1
+hàng tháng theo giờ Việt Nam. `next_check_at` vẫn được lưu để tham khảo, nhưng
+không còn là cơ chế tự refresh hàng ngày.
 
 ## 8. Cập nhật XInvoice tự động
 
 ### Chiến lược xử lý
 
-- Supabase Cron gọi Edge Function mỗi 30 hoặc 60 giây.
+- Một cron dispatcher enqueue toàn bộ MST lúc 05:00 UTC ngày 1 hàng tháng
+  (12:00 UTC+7).
+- Một cron drain gọi worker mỗi phút; khi hàng đợi rỗng worker không gọi XInvoice.
 - Mỗi lần chạy chỉ nhận một lô nhỏ, ban đầu tối đa 10 MST.
+- Lần đầu seed đã đưa toàn bộ MST vào hàng đợi để chạy backfill.
+- Khi thêm hoặc bấm cập nhật một MST, API gửi `taxCode` để worker claim đúng mã đó.
 - Chỉ một worker được quyền nhận cùng một MST tại một thời điểm.
 - Dùng khóa database hoặc cơ chế claim nguyên tử để tránh hai worker xử lý trùng.
 - Đọc `RateLimit` và `Retry-After` từ XInvoice thay vì chỉ dựa vào giá trị hard-code.
@@ -256,10 +267,8 @@ Mặc định đề xuất cho MVP: dữ liệu được xem là cũ sau 24 gi�
 
 - Giới hạn quan sát được: khoảng 10 request/30 giây.
 - Số MST duy nhất: 1.658.
-- Thời gian tối thiểu cho một vòng cập nhật toàn bộ: khoảng 83 phút.
-- Số request nếu cập nhật toàn bộ mỗi ngày: khoảng 49.740 request/tháng.
-
-Cần xác nhận quota và điều khoản chính thức của tài khoản XInvoice trước khi bật cập nhật hàng ngày.
+- Với tối đa 10 MST mỗi phút, backfill lần đầu dự kiến khoảng 166 phút.
+- Sau đó chỉ có một vòng toàn bộ mỗi tháng, ngoài các targeted refresh do người dùng yêu cầu.
 
 ### Hành vi khi có lỗi
 
@@ -272,29 +281,22 @@ Cần xác nhận quota và điều khoản chính thức của tài khoản XIn
 | Payload không đúng cấu trúc | Lưu lỗi rút gọn, không cập nhật trạng thái |
 | MST bất thường | Chuyển vào `import_issues`, không tự sửa nếu không chắc chắn |
 
-## 9. Xác thực và phân quyền
+## 9. Xác thực nội bộ và bảo vệ dữ liệu
 
-### Provider đăng nhập
-
-- Giai đoạn đầu: Google.
-- Nếu tổ chức dùng Microsoft 365: cân nhắc Azure/Microsoft thay cho Facebook.
-- Facebook và các provider khác chỉ thêm khi có yêu cầu thực tế.
-
-Mỗi provider cần OAuth App, client ID, client secret và redirect URL riêng. Việc bật provider trong Supabase không tự tạo các thông tin này.
-
-### Phân biệt xác thực và cấp quyền
-
-- Supabase Auth xác nhận người dùng là ai.
-- Bảng `profiles` quyết định người dùng có được sử dụng ứng dụng hay không.
-- Mặc định tài khoản mới ở trạng thái `pending`.
-- Quản trị viên phê duyệt hoặc hệ thống chỉ cho phép tên miền email nội bộ.
+- Vercel kiểm tra `APP_LOGIN_USERNAME` và `APP_LOGIN_PASSWORD` ở server.
+- Sau khi đăng nhập, ứng dụng cấp cookie `mst_checker_session` có chữ ký HMAC,
+  `httpOnly`, `sameSite=lax` và thời hạn giới hạn.
+- `APP_SESSION_SECRET` không được commit.
+- Supabase Auth/OAuth không tham gia vào luồng hiện tại; bảng `profiles` cũ
+  được giữ lại để không phá dữ liệu/migration nhưng không được đọc bởi UI.
 
 ### RLS và bảo vệ dữ liệu
 
 - Bật Row Level Security cho toàn bộ bảng nghiệp vụ.
-- Client không được quyền trực tiếp thêm, sửa hoặc xóa `taxpayers`.
-- Không cấp quyền đọc toàn bộ bảng chỉ vì người dùng đã đăng nhập.
-- Mọi tra cứu đi qua API Route/RPC giới hạn theo đúng một MST.
+- Client không được quyền trực tiếp kết nối Supabase; mọi thao tác đi qua API
+  Route của Next.js.
+- `SUPABASE_SECRET_KEY` chỉ tồn tại trên Vercel server và bypass RLS có chủ đích.
+- Mọi tra cứu, thêm MST và xuất Excel đều kiểm tra cookie phiên trước khi đọc DB.
 - Cập nhật XInvoice chỉ được thực hiện bởi Edge Function dùng service role.
 - Ghi nhật ký các lượt tra cứu và thao tác quản trị.
 - Thêm giới hạn tần suất theo người dùng để tránh quét toàn bộ database.
@@ -303,29 +305,27 @@ Mỗi provider cần OAuth App, client ID, client secret và redirect URL riêng
 
 Không đưa các giá trị sau xuống trình duyệt:
 
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `XINVOICE_CLIENT_ID`
-- `XINVOICE_API_KEY`
-- OAuth provider client secrets
+- `SUPABASE_SECRET_KEY`
+- `APP_LOGIN_PASSWORD`
+- `APP_SESSION_SECRET`
+- Vercel Environment Variables containing application or Supabase secrets
 
 Phân bổ đề xuất:
 
 | Biến | Nơi lưu |
 |---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | Vercel Environment Variables, được phép công khai |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Vercel Environment Variables, được phép công khai khi RLS đúng |
-| `SUPABASE_SERVICE_ROLE_KEY` | Chỉ Vercel server nếu API Route thật sự cần |
-| `XINVOICE_CLIENT_ID` | Supabase Edge Function Secrets |
-| `XINVOICE_API_KEY` | Supabase Edge Function Secrets |
-
+| `SUPABASE_URL` | Vercel Environment Variables, server-only |
+| `SUPABASE_SECRET_KEY` | Vercel Environment Variables, server-only |
+| `APP_LOGIN_USERNAME` | Vercel Environment Variables |
+| `APP_LOGIN_PASSWORD` | Vercel Environment Variables, sensitive |
+| `APP_SESSION_SECRET` | Vercel Environment Variables, sensitive |
 ## 11. Đánh giá giới hạn gói miễn phí
 
 ### Vercel Hobby
 
-- 1.000.000 Function invocations/tháng.
-- Tối đa 300 giây cho một Vercel Function.
-- Cron chỉ chạy một lần/ngày và có thể lệch tới 59 phút.
-- Chỉ dành cho mục đích cá nhân, phi thương mại theo chính sách hiện tại.
+- Chỉ dùng cho giao diện Next.js và API server-side nhẹ.
+- Không dùng Vercel Cron để chạy vòng cập nhật XInvoice.
+- Vercel API không được giữ secret XInvoice hoặc chạy worker dài.
 
 Hệ quả:
 
@@ -358,49 +358,49 @@ Hệ quả:
 - [x] Phân tích Vercel Hobby và Supabase Free.
 - [ ] Chốt phạm vi MST được phép tra cứu.
 - [ ] Chốt chu kỳ làm mới dữ liệu.
-- [ ] Chốt provider đăng nhập đầu tiên.
-- [ ] Chốt việc có giữ chức năng xuất Excel hay không.
-- [ ] Phê duyệt kiến trúc trước khi viết code.
+- [x] Chốt đăng nhập nội bộ bằng tài khoản ứng dụng.
+- [x] Giữ chức năng xuất Excel theo năm.
+- [x] Phê duyệt kiến trúc trước khi viết code.
 
 Kết quả: tài liệu thiết kế được duyệt và không còn quyết định ảnh hưởng lớn đến schema.
 
 ### Giai đoạn 1: Chuẩn hóa dữ liệu và database
 
 - [ ] Xác nhận 17 MST bất thường.
-- [ ] Thiết kế migration SQL tạo bảng, index và constraint.
-- [ ] Tạo script đọc workbook offline và sinh SQL UTF-8.
-- [ ] Tạo seed SQL có thể chạy lại an toàn.
-- [ ] Nạp `taxpayers`, `taxpayer_sources` và `import_issues`.
-- [ ] Kiểm tra tổng số bản ghi và các MST có số `0` đầu tiên.
-- [ ] Thiết lập RLS cơ bản.
+- [x] Thiết kế migration SQL tạo bảng, index và constraint.
+- [x] Tạo script đọc workbook offline và sinh SQL UTF-8.
+- [x] Tạo seed SQL có thể chạy lại an toàn.
+- [x] Nạp logic cho `taxpayers`, `taxpayer_sources` và `import_issues`.
+- [x] Kiểm tra tổng số bản ghi và các MST có số `0` đầu tiên.
+- [x] Thiết lập RLS cơ bản.
 
 Kết quả: Supabase chứa dữ liệu đã chuẩn hóa, có thể đối chiếu lại với workbook.
 
 Ước lượng: 0,5–1 ngày.
 
-### Giai đoạn 2: Next.js, Auth và phân quyền
+### Giai đoạn 2: Next.js, đăng nhập nội bộ và API
 
-- [ ] Khởi tạo Next.js App Router với TypeScript.
-- [ ] Thiết lập Supabase SSR/Auth.
-- [ ] Cấu hình Google OAuth.
-- [ ] Tạo callback và xử lý session.
-- [ ] Tạo `profiles` và quy trình phê duyệt.
-- [ ] Bảo vệ route tra cứu và route quản trị.
-- [ ] Hoàn thiện RLS và kiểm thử truy cập trái phép.
+- [x] Khởi tạo Next.js App Router với TypeScript.
+- [x] Tạo đăng nhập username/password nội bộ.
+- [x] Tạo cookie phiên httpOnly có chữ ký.
+- [x] Chuyển API sang Supabase server-only secret key.
+- [x] Bảo vệ route tra cứu, thêm MST và xuất Excel.
 
 Kết quả: chỉ người dùng được phê duyệt mới truy cập được ứng dụng.
 
 Ước lượng: khoảng 1 ngày.
 
-### Giai đoạn 3: Trang tra cứu
+### Giai đoạn 3: Trang tra cứu và workbook
 
-- [ ] Thiết kế giao diện tra cứu MST.
-- [ ] Kiểm tra và chuẩn hóa dữ liệu nhập.
-- [ ] Tạo API Route/RPC tra cứu chính xác một MST.
-- [ ] Hiển thị trạng thái, thông tin doanh nghiệp và thời điểm tra cứu.
-- [ ] Hiển thị dữ liệu cũ/đang cập nhật/lỗi.
-- [ ] Ghi `lookup_audit_logs`.
-- [ ] Thêm rate limit theo tài khoản.
+- [x] Thiết kế giao diện tra cứu MST.
+- [x] Kiểm tra và chuẩn hóa dữ liệu nhập.
+- [x] Tạo API Route/RPC tra cứu chính xác một MST.
+- [x] Hiển thị trạng thái, thông tin doanh nghiệp và thời điểm tra cứu.
+- [x] Hiển thị dữ liệu cũ/đang cập nhật/lỗi.
+- [x] Hiển thị tổng hợp và lọc nhanh.
+- [x] Hiển thị tab năm động từ database.
+- [x] Thêm MST theo năm.
+- [x] Xuất workbook nhiều sheet với cột cập nhật.
 
 Kết quả: người dùng tra cứu dữ liệu đã nạp gần như tức thời.
 
@@ -408,15 +408,16 @@ Kết quả: người dùng tra cứu dữ liệu đã nạp gần như tức th
 
 ### Giai đoạn 4: Worker cập nhật XInvoice
 
-- [ ] Tạo `refresh_queue` và hàm claim nguyên tử.
-- [ ] Tạo Supabase Edge Function gọi XInvoice.
-- [ ] Cấu hình secrets.
-- [ ] Xử lý rate limit, timeout, retry và backoff.
-- [ ] So sánh trạng thái chuẩn hóa.
-- [ ] Ghi lịch sử khi trạng thái thay đổi.
-- [ ] Tạo Supabase Cron.
-- [ ] Thêm cơ chế ưu tiên MST vừa được người dùng tra cứu.
-- [ ] Tạo dashboard theo dõi tiến độ và lỗi.
+- [x] Tạo `refresh_queue` và hàm claim nguyên tử.
+- [x] Tạo Supabase Edge Function gọi XInvoice.
+- [x] Cấu hình secrets trên project Supabase thực tế.
+- [x] Xử lý rate limit, timeout, retry và backoff.
+- [x] So sánh trạng thái chuẩn hóa.
+- [x] Ghi lịch sử khi trạng thái thay đổi.
+- [x] Kích hoạt Supabase Cron trên project thực tế.
+- [x] Thêm cơ chế ưu tiên MST vừa được người dùng tra cứu.
+- [x] Thêm nút cập nhật targeted sau từng MST.
+- [x] Hiển thị summary pending/error trên dashboard.
 
 Kết quả: dữ liệu được làm mới nền mà không cần mở trình duyệt.
 
@@ -426,11 +427,11 @@ Kết quả: dữ liệu được làm mới nền mà không cần mở trình 
 
 - [ ] Unit test chuẩn hóa MST và trạng thái.
 - [ ] Integration test Supabase và XInvoice mock.
-- [ ] Kiểm tra RLS bằng tài khoản anon, pending, approved và admin.
+- [x] Kiểm tra cookie login và API không có session.
 - [ ] Kiểm tra job bị chạy trùng.
 - [ ] Kiểm tra khôi phục sau 429, timeout và 5xx.
 - [ ] Kiểm tra một vòng cập nhật có đầy đủ số lượng.
-- [ ] Thiết lập Vercel production domain và OAuth redirect URL.
+- [ ] Thiết lập Vercel production domain và Environment Variables.
 - [ ] Lập quy trình backup/restore.
 - [ ] Viết hướng dẫn vận hành.
 
@@ -442,15 +443,18 @@ Kết quả: MVP có thể bàn giao cho nhóm người dùng thử nghiệm.
 
 Khoảng 3–5 ngày phát triển tập trung, chưa tính thời gian chờ:
 
-- Cấp `client-id` và `api-key` XInvoice.
-- Tạo OAuth App với Google/Microsoft/Facebook.
+- Xác nhận quota và khả năng truy cập ổn định tới endpoint XInvoice công khai.
 - Xác minh 17 MST bất thường.
 - Phản hồi và nghiệm thu giao diện.
 
 ## 13. Tiêu chí nghiệm thu MVP
 
-- Đăng nhập Google thành công trên domain production.
-- Tài khoản chưa phê duyệt không thể tra cứu.
+- Đăng nhập nội bộ thành công trên domain production sau khi cấu hình Vercel Environment Variables.
+- Sheet T2-26 được lưu trong database dưới năm 2026 và có thể xuất lại thành sheet 2026.
+- Cron ngày 1 hàng tháng enqueue toàn bộ MST; cron drain xử lý hàng đợi theo lô.
+- Nút cập nhật từng MST chỉ claim và cập nhật đúng mã được chọn.
+- MST đã tồn tại khi thêm mới bị từ chối và trả cảnh báo trùng.
+- API không có cookie phiên trả về 401.
 - Tra cứu đúng MST có trong database và không lộ danh sách toàn bộ MST.
 - MST giữ được số `0` đầu tiên.
 - Kết quả hiển thị `last_checked_at` rõ ràng.
@@ -471,33 +475,31 @@ Khoảng 3–5 ngày phát triển tập trung, chưa tính thời gian chờ:
 | Vercel Hobby không phù hợp ứng dụng doanh nghiệp | Cao | Chỉ dùng cho demo hoặc chuyển Vercel Pro trước production |
 | Supabase Free bị pause | Trung bình | Theo dõi hoạt động, quy trình restore, cân nhắc Pro |
 | Không có backup tải xuống trên Free | Cao | Chạy `supabase db dump` định kỳ và lưu ngoài nền tảng |
-| Người dùng đăng nhập nhưng không được phép | Cao | Approval workflow hoặc email domain allowlist |
-| Người dùng quét hàng loạt dữ liệu | Trung bình | API server-side, rate limit theo tài khoản, audit log |
+| Mật khẩu nội bộ bị lộ | Cao | Không commit, thay mật khẩu trước production, dùng cookie ký và HTTPS |
+| Người dùng quét hàng loạt dữ liệu | Trung bình | API server-side, giới hạn truy vấn và theo dõi log |
 | Dữ liệu lịch sử tăng quá nhanh | Trung bình | Chỉ lưu khi trạng thái thay đổi, có retention cho log |
 | MST nguồn bị sai/mất số 0 | Cao | Lưu dạng text, quarantine 17 dòng bất thường, đối chiếu trước seed |
 | Hai job xử lý trùng | Trung bình | Claim nguyên tử, `locked_at`, timeout lock và idempotent upsert |
 
 ## 15. Các quyết định cần chốt trước khi triển khai
 
-1. MVP chỉ tra cứu 1.658 MST đã nhập hay được phép thêm MST mới khi người dùng tìm kiếm?
-2. Chu kỳ làm mới là 24 giờ, 7 ngày hay chỉ cập nhật khi có người tra cứu?
-3. Provider đăng nhập đầu tiên là Google hay Microsoft/Azure?
-4. Tài khoản mới cần quản trị viên phê duyệt hay chỉ cần đúng tên miền email?
-5. Chức năng xuất Excel cập nhật có còn là yêu cầu bắt buộc không?
-6. Đã có `client-id` và `api-key` XInvoice chính thức chưa?
-7. Đây là môi trường demo cá nhân hay ứng dụng nội bộ doanh nghiệp dùng thật?
+1. Chu kỳ làm mới nền mặc định 24 giờ, có thể điều chỉnh bằng queue.
+2. Tài khoản nội bộ ban đầu là `hainh`; mật khẩu lưu trong Vercel, không commit.
+3. Đã xác nhận bắt buộc xuất Excel theo các năm trong database.
+4. Endpoint XInvoice hiện không yêu cầu `client-id` hoặc `api-key`; chỉ cần cấu hình secret nội bộ cho worker.
+5. Cần thay mật khẩu mẫu trước khi mở domain cho nhiều người dùng.
 
 ## 16. Khuyến nghị mặc định
 
 Nếu chưa có yêu cầu khác, phương án mặc định được đề xuất là:
 
-- Chỉ tra cứu danh sách đã nạp; quản trị viên mới được thêm MST.
-- Google Auth với quy trình phê duyệt tài khoản.
+- Cho phép tài khoản nội bộ thêm MST theo năm.
+- Vercel login cookie thay cho Supabase Auth trong giai đoạn beta.
 - Làm mới dữ liệu trong vòng 24 giờ.
 - Trả kết quả cache ngay và ưu tiên cập nhật MST vừa được tìm kiếm.
 - Supabase Cron + Edge Function thực hiện cập nhật nền.
 - Chỉ lưu lịch sử khi trạng thái thay đổi.
-- Vercel Hobby + Supabase Free chỉ dùng cho MVP/pilot.
+- Vercel chỉ phục vụ UI/API; Supabase Cron + Edge Function chạy cập nhật nền.
 - Trước khi đưa vào sử dụng nội bộ chính thức, đánh giá Vercel Pro, Supabase Pro và kế hoạch backup.
 
 ## 17. Tài liệu tham khảo chính thức
@@ -511,4 +513,3 @@ Nếu chưa có yêu cầu khác, phương án mặc định được đề xu�
 - [Supabase Edge Function Limits](https://supabase.com/docs/guides/functions/limits)
 - [Supabase Cron](https://supabase.com/docs/guides/cron)
 - [XInvoice API tra cứu mã số thuế](https://xinvoice.vn/apis/tra-cuu-ma-so-thue)
-

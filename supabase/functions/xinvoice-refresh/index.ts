@@ -5,6 +5,11 @@ type RefreshJob = {
   attempts: number;
 };
 
+type RefreshRequest = {
+  taxCode?: string;
+  preview?: boolean;
+};
+
 type XInvoicePayload = {
   orgType?: string;
   taxID?: string;
@@ -15,17 +20,88 @@ type XInvoicePayload = {
   updatedAt?: string;
 };
 
-const supabaseUrl = Deno.env.get("SUPABASE_URL");
-const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-const clientId = Deno.env.get("XINVOICE_CLIENT_ID");
-const apiKey = Deno.env.get("XINVOICE_API_KEY");
-const workerSecret = Deno.env.get("REFRESH_WORKER_SECRET");
+type VietQrPayload = {
+  id?: string;
+  name?: string;
+  address?: string;
+  status?: string;
+  updatedAt?: string;
+  metadata?: {
+    updatedAt?: string;
+  };
+};
 
-if (!supabaseUrl || !serviceRoleKey) {
-  throw new Error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required");
+type LookupResult = {
+  payload: XInvoicePayload;
+  provider: "xinvoice" | "vietqr";
+};
+
+type TaxpayerPreview = {
+  tax_code: string;
+  name: string | null;
+  org_type: string | null;
+  address: string | null;
+  tax_department: string | null;
+  status: string | null;
+  status_group: string;
+  source_updated_at: string | null;
+};
+
+type EndpointSettings = {
+  primaryEndpoint: string;
+  fallbackEndpoint: string;
+};
+
+class RefreshWorkerError extends Error {
+  retryAfterSeconds?: number;
+
+  constructor(message: string, retryAfterSeconds?: number) {
+    super(message);
+    this.name = "RefreshWorkerError";
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
 }
 
-const supabase = createClient(supabaseUrl, serviceRoleKey, {
+type CurrentTaxpayer = {
+  name: string | null;
+  org_type: string | null;
+  address: string | null;
+  tax_department: string | null;
+  status: string | null;
+  status_group: string | null;
+  source_updated_at: string | null;
+  last_checked_at: string | null;
+  last_error: string | null;
+  consecutive_failures: number;
+};
+
+const supabaseUrl = Deno.env.get("SUPABASE_URL");
+const secretKeysJson = Deno.env.get("SUPABASE_SECRET_KEYS");
+const singleSecretKey = Deno.env.get("SUPABASE_SECRET_KEY");
+const workerSecret = Deno.env.get("REFRESH_WORKER_SECRET");
+const DEFAULT_PRIMARY_ENDPOINT = "https://api.xinvoice.vn/gdt-api/tax-payer/{taxCode}";
+const DEFAULT_FALLBACK_ENDPOINT = "https://api.vietqr.io/v2/business/{taxCode}";
+const PRIMARY_ENDPOINT_KEY = "primary_tax_lookup_endpoint";
+const FALLBACK_ENDPOINT_KEY = "fallback_tax_lookup_endpoint";
+
+let secretKey: string | undefined;
+if (secretKeysJson) {
+  try {
+    const secretKeys = JSON.parse(secretKeysJson) as Record<string, unknown>;
+    if (typeof secretKeys.default === "string") secretKey = secretKeys.default;
+  } catch {
+    throw new Error("SUPABASE_SECRET_KEYS must be valid JSON");
+  }
+}
+
+// Legacy fallback keeps already-configured projects working during migration.
+secretKey ??= singleSecretKey ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? undefined;
+
+if (!supabaseUrl || !secretKey) {
+  throw new Error("SUPABASE_URL and a Supabase secret key are required");
+}
+
+const supabase = createClient(supabaseUrl, secretKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
@@ -40,43 +116,192 @@ function materialStatusChanged(oldStatus: string | null, oldGroup: string | null
   return oldGroup !== newGroup || (oldStatus ?? "") !== (newStatus ?? "");
 }
 
-async function handleJob(job: RefreshJob) {
-  if (!clientId || !apiKey) {
-    throw new Error("XInvoice credentials are not configured");
+function normalizedDate(value: string | null | undefined) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function preferVietQrValue(currentValue: string | null, incomingValue: string | undefined, currentUpdatedAt: string | null, incomingUpdatedAt: string | null) {
+  if (!incomingValue) return currentValue;
+  if (!currentValue) return incomingValue;
+
+  const currentDate = normalizedDate(currentUpdatedAt);
+  const incomingDate = normalizedDate(incomingUpdatedAt);
+  // An undated fallback must not replace an existing XInvoice value. A dated
+  // VietQR result may replace it only when it is at least as new.
+  if (!incomingDate || (currentDate && incomingDate < currentDate)) return currentValue;
+  return incomingValue;
+}
+
+function nextMonthlyRefreshAt(now: Date) {
+  // Supabase Cron is configured in UTC. 12:00 in Vietnam is 05:00 UTC.
+  const vietnamNow = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+  return new Date(Date.UTC(vietnamNow.getUTCFullYear(), vietnamNow.getUTCMonth() + 1, 1, 5, 0, 0)).toISOString();
+}
+
+function normalizeTaxCode(value: string) {
+  return value.trim().replace(/\s+/g, "").replace(/[–—]/g, "-");
+}
+
+function isValidTaxCode(value: string) {
+  return /^(?:\d{10}|\d{10}-\d{3}|\d{12})$/.test(value);
+}
+
+function retryAfterHeader(response: Response, fallbackSeconds: number) {
+  const retryAfter = Number(response.headers.get("retry-after") ?? "");
+  return Number.isFinite(retryAfter)
+    ? Math.max(30, Math.min(retryAfter, 3600))
+    : fallbackSeconds;
+}
+
+function isUsableEndpoint(value: unknown): value is string {
+  if (typeof value !== "string" || !value.trim() || !value.includes("{taxCode}")) return false;
+  try {
+    const url = new URL(value.replaceAll("{taxCode}", "0101167823"));
+    return url.protocol === "https:" && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+}
+
+async function loadEndpointSettings(): Promise<EndpointSettings> {
+  const { data, error } = await supabase
+    .from("app_settings")
+    .select("setting_key, setting_value")
+    .in("setting_key", [PRIMARY_ENDPOINT_KEY, FALLBACK_ENDPOINT_KEY]);
+
+  if (error) {
+    console.warn("Endpoint settings unavailable; using defaults", error.message);
+    return { primaryEndpoint: DEFAULT_PRIMARY_ENDPOINT, fallbackEndpoint: DEFAULT_FALLBACK_ENDPOINT };
   }
 
-  const response = await fetch(`https://api.xinvoice.vn/gdt-api/tax-payer/${encodeURIComponent(job.tax_code)}`, {
+  const values = new Map((data ?? []).map((row) => [row.setting_key, row.setting_value]));
+  const primaryEndpoint = isUsableEndpoint(values.get(PRIMARY_ENDPOINT_KEY))
+    ? values.get(PRIMARY_ENDPOINT_KEY) as string
+    : DEFAULT_PRIMARY_ENDPOINT;
+  const fallbackEndpoint = isUsableEndpoint(values.get(FALLBACK_ENDPOINT_KEY))
+    ? values.get(FALLBACK_ENDPOINT_KEY) as string
+    : DEFAULT_FALLBACK_ENDPOINT;
+
+  return { primaryEndpoint, fallbackEndpoint };
+}
+
+function resolveEndpoint(template: string, taxCode: string) {
+  return template.replaceAll("{taxCode}", encodeURIComponent(taxCode));
+}
+
+async function fetchXInvoice(taxCode: string, endpoints: EndpointSettings): Promise<LookupResult> {
+  const response = await fetch(resolveEndpoint(endpoints.primaryEndpoint, taxCode), {
     headers: {
       Accept: "application/json",
-      "client-id": clientId,
-      "api-key": apiKey,
     },
   });
 
   if (response.status === 429) {
-    const retryAfter = Number(response.headers.get("retry-after") ?? "60");
-    const delaySeconds = Number.isFinite(retryAfter) ? Math.max(30, Math.min(retryAfter, 3600)) : 60;
-    throw new Error(`RATE_LIMIT:${delaySeconds}`);
+    const delaySeconds = retryAfterHeader(response, 60);
+    throw new RefreshWorkerError(`RATE_LIMIT:${delaySeconds}`, delaySeconds);
   }
 
   if (!response.ok) {
-    throw new Error(`XINVOICE_HTTP_${response.status}`);
+    throw new RefreshWorkerError(`XINVOICE_HTTP_${response.status}`);
   }
 
   const raw = (await response.json()) as XInvoicePayload | { data?: XInvoicePayload };
   const payload = "data" in raw && raw.data ? raw.data : raw as XInvoicePayload;
-  const newStatus = payload.status ?? null;
-  const newGroup = statusGroup(newStatus);
+  return { payload, provider: "xinvoice" };
+}
 
+async function fetchVietQr(taxCode: string, endpoints: EndpointSettings): Promise<LookupResult> {
+  const response = await fetch(resolveEndpoint(endpoints.fallbackEndpoint, taxCode), {
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  if (response.status === 429) {
+    const delaySeconds = retryAfterHeader(response, 60);
+    throw new RefreshWorkerError(`VIETQR_RATE_LIMIT:${delaySeconds}`, delaySeconds);
+  }
+
+  if (!response.ok) {
+    throw new RefreshWorkerError(`VIETQR_HTTP_${response.status}`);
+  }
+
+  const raw = await response.json() as { code?: string; desc?: string; data?: VietQrPayload | null };
+  if (!raw.data || (raw.code && raw.code !== "00")) {
+    throw new RefreshWorkerError(`VIETQR_NO_DATA${raw.desc ? `:${raw.desc}` : ""}`);
+  }
+
+  return {
+    provider: "vietqr",
+    payload: {
+      // VietQR is intentionally a partial fallback. Fields that it does not
+      // publish are kept from the current XInvoice record below.
+      taxID: raw.data.id,
+      name: raw.data.name,
+      address: raw.data.address,
+      status: raw.data.status,
+      updatedAt: raw.data.metadata?.updatedAt ?? raw.data.updatedAt,
+    },
+  };
+}
+
+async function fetchWithFallback(taxCode: string, endpoints: EndpointSettings): Promise<LookupResult> {
+  try {
+    return await fetchXInvoice(taxCode, endpoints);
+  } catch (primaryError) {
+    try {
+      return await fetchVietQr(taxCode, endpoints);
+    } catch (fallbackError) {
+      const primaryMessage = primaryError instanceof Error ? primaryError.message : "XINVOICE_LOOKUP_FAILED";
+      const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : "VIETQR_LOOKUP_FAILED";
+      const retryAfterSeconds = Math.max(
+        primaryError instanceof RefreshWorkerError ? primaryError.retryAfterSeconds ?? 0 : 0,
+        fallbackError instanceof RefreshWorkerError ? fallbackError.retryAfterSeconds ?? 0 : 0,
+      );
+      throw new RefreshWorkerError(`${primaryMessage}; ${fallbackMessage}`, retryAfterSeconds || undefined);
+    }
+  }
+}
+
+async function handleJob(job: RefreshJob, endpoints: EndpointSettings) {
   const { data: current, error: currentError } = await supabase
     .from("taxpayers")
-    .select("status, status_group")
+    .select("name, org_type, address, tax_department, status, status_group, source_updated_at, last_checked_at, last_error, consecutive_failures")
     .eq("tax_code", job.tax_code)
-    .single();
+    .single<CurrentTaxpayer>();
 
   if (currentError) throw currentError;
 
+  const { payload, provider } = await fetchWithFallback(job.tax_code, endpoints);
+  const incomingSourceUpdatedAt = normalizedDate(payload.updatedAt);
+  const nextName = provider === "vietqr"
+    ? preferVietQrValue(current.name, payload.name, current.source_updated_at, incomingSourceUpdatedAt)
+    : payload.name ?? null;
+  const nextOrgType = provider === "vietqr" ? current.org_type : payload.orgType ?? null;
+  const nextAddress = provider === "vietqr"
+    ? preferVietQrValue(current.address, payload.address, current.source_updated_at, incomingSourceUpdatedAt)
+    : payload.address ?? null;
+  const nextTaxDepartment = provider === "vietqr" ? current.tax_department : payload.taxDepartment ?? null;
+  const newStatus = provider === "vietqr"
+    ? preferVietQrValue(current.status, payload.status, current.source_updated_at, incomingSourceUpdatedAt)
+    : payload.status ?? null;
+  const newGroup = statusGroup(newStatus);
+  const nextSourceUpdatedAt = provider === "vietqr"
+    ? (incomingSourceUpdatedAt && (!current.source_updated_at || incomingSourceUpdatedAt >= current.source_updated_at)
+      ? incomingSourceUpdatedAt
+      : current.source_updated_at)
+    : incomingSourceUpdatedAt;
+
   const changed = materialStatusChanged(current.status, current.status_group, newStatus, newGroup);
+  const payloadChanged = current.name !== nextName
+    || current.org_type !== nextOrgType
+    || current.address !== nextAddress
+    || current.tax_department !== nextTaxDepartment
+    || current.status !== newStatus
+    || current.status_group !== newGroup
+    || normalizedDate(current.source_updated_at) !== nextSourceUpdatedAt;
   const now = new Date().toISOString();
 
   if (changed) {
@@ -88,28 +313,38 @@ async function handleJob(job: RefreshJob) {
       new_status_group: newGroup,
       detected_at: now,
       source_updated_at: payload.updatedAt ?? null,
-      note: "Status change detected by scheduled XInvoice refresh",
+      note: `Status change detected by ${provider} refresh`,
     });
     if (historyError) throw historyError;
   }
 
+  const timestampUpdate = {
+    previous_checked_at: current.last_checked_at ?? null,
+    last_checked_at: now,
+  };
+  const taxpayerUpdate = payloadChanged
+    ? {
+        ...timestampUpdate,
+        name: nextName,
+        org_type: nextOrgType,
+        address: nextAddress,
+        tax_department: nextTaxDepartment,
+        status: newStatus,
+        status_group: newGroup,
+        source_updated_at: nextSourceUpdatedAt,
+        status_changed_at: changed ? now : undefined,
+        last_error: null,
+        consecutive_failures: 0,
+        next_check_at: nextMonthlyRefreshAt(new Date(now)),
+        raw_current_response: { provider, payload },
+      }
+    : current.last_error || current.consecutive_failures > 0
+      ? { ...timestampUpdate, last_error: null, consecutive_failures: 0 }
+      : timestampUpdate;
+
   const { error: updateError } = await supabase
     .from("taxpayers")
-    .update({
-      name: payload.name ?? null,
-      org_type: payload.orgType ?? null,
-      address: payload.address ?? null,
-      tax_department: payload.taxDepartment ?? null,
-      status: newStatus,
-      status_group: newGroup,
-      source_updated_at: payload.updatedAt ?? null,
-      last_checked_at: now,
-      status_changed_at: changed ? now : undefined,
-      last_error: null,
-      consecutive_failures: 0,
-      next_check_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-      raw_current_response: payload,
-    })
+    .update(taxpayerUpdate)
     .eq("tax_code", job.tax_code);
 
   if (updateError) throw updateError;
@@ -127,25 +362,84 @@ function retryDelay(attempts: number) {
 }
 
 Deno.serve(async (request) => {
-  if (workerSecret && request.headers.get("x-refresh-secret") !== workerSecret) {
-    return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { "content-type": "application/json" } });
+  if (!workerSecret) {
+    return new Response(JSON.stringify({ error: "worker secret is not configured" }), { status: 503, headers: { "content-type": "application/json" } });
+  }
+  if (request.headers.get("x-refresh-secret") !== workerSecret) {
+   return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { "content-type": "application/json" } });
+ }
+
+  let body: RefreshRequest = {};
+  try {
+    body = await request.json() as RefreshRequest;
+  } catch {
+    // An empty request body is valid for the batch drain cron.
   }
 
-  const { data: jobs, error: claimError } = await supabase.rpc("claim_refresh_batch", { p_limit: 10 });
+  const requestedTaxCode = normalizeTaxCode(body.taxCode ?? "");
+  if (body.taxCode && !isValidTaxCode(requestedTaxCode)) {
+    return new Response(JSON.stringify({ error: "Invalid tax code format" }), { status: 400, headers: { "content-type": "application/json" } });
+  }
+
+  // Preview is used while adding a new MST. It intentionally does not claim
+  // a queue job or write anything to Supabase; it only reads the configured
+  // endpoints and returns the latest available lookup data.
+  if (body.preview) {
+    if (!requestedTaxCode) {
+      return new Response(JSON.stringify({ error: "Tax code is required for preview" }), { status: 400, headers: { "content-type": "application/json" } });
+    }
+
+    try {
+      const endpoints = await loadEndpointSettings();
+      const { payload, provider } = await fetchWithFallback(requestedTaxCode, endpoints);
+      const preview: TaxpayerPreview = {
+        tax_code: requestedTaxCode,
+        name: payload.name ?? null,
+        org_type: payload.orgType ?? null,
+        address: payload.address ?? null,
+        tax_department: payload.taxDepartment ?? null,
+        status: payload.status ?? null,
+        status_group: statusGroup(payload.status),
+        source_updated_at: normalizedDate(payload.updatedAt),
+      };
+
+      return new Response(JSON.stringify({ ok: true, preview, provider }), {
+        headers: { "content-type": "application/json" },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Preview lookup failed";
+      const retryAfterSeconds = error instanceof RefreshWorkerError ? error.retryAfterSeconds : undefined;
+      return new Response(JSON.stringify({ error: message }), {
+        status: retryAfterSeconds ? 429 : 502,
+        headers: retryAfterSeconds
+          ? { "content-type": "application/json", "retry-after": String(retryAfterSeconds) }
+          : { "content-type": "application/json" },
+      });
+    }
+  }
+
+  const { data: jobs, error: claimError } = requestedTaxCode
+    ? await supabase.rpc("claim_refresh_job", { p_tax_code: requestedTaxCode })
+    : await supabase.rpc("claim_refresh_batch", { p_limit: 10 });
   if (claimError) {
     return new Response(JSON.stringify({ error: claimError.message }), { status: 500, headers: { "content-type": "application/json" } });
   }
 
   const results: Array<{ tax_code: string; ok: boolean; error?: string }> = [];
+  const endpointSettings = await loadEndpointSettings();
 
   for (const job of (jobs ?? []) as RefreshJob[]) {
     try {
-      await handleJob(job);
+      await handleJob(job, endpointSettings);
       results.push({ tax_code: job.tax_code, ok: true });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown worker error";
       const rateLimitMatch = message.match(/^RATE_LIMIT:(\d+)$/);
-      const delay = rateLimitMatch ? Number(rateLimitMatch[1]) : retryDelay(job.attempts + 1);
+      const delay = rateLimitMatch
+        ? Number(rateLimitMatch[1])
+        : error instanceof RefreshWorkerError && error.retryAfterSeconds
+          ? error.retryAfterSeconds
+          : retryDelay(job.attempts + 1);
       const nextState = job.attempts + 1 >= 8 ? "dead_letter" : "retry";
       await supabase.from("refresh_queue").update({
         state: nextState,
