@@ -194,6 +194,7 @@ button:not(:disabled):active { transform: translateY(1px); }
 .data-table .data-row:hover, .data-table .data-row-expanded { background: var(--surface-hover); }
 .data-table td strong { display: block; color: var(--ink); font-size: 13px; font-weight: 650; letter-spacing: -0.012em; }
 .data-table td small { display: block; max-width: 270px; margin-top: 4px; overflow: hidden; color: var(--muted); font-size: 11px; font-weight: 450; text-overflow: ellipsis; white-space: nowrap; }
+.data-table td small.stale-source-label { max-width: none; overflow: visible; color: var(--muted); font-style: italic; }
 .col-expand { width: 42px; padding-right: 0 !important; padding-left: 22px !important; color: var(--muted); }
 .caret-open { color: var(--accent-dark); transform: rotate(90deg); }
 .tax-code-cell { color: var(--accent-dark) !important; font-family: inherit; font-size: 12px !important; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -264,6 +265,15 @@ button:not(:disabled):active { transform: translateY(1px); }
 
 .confirm-backdrop { position: fixed; z-index: 50; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(18, 35, 62, 0.5); }
 .confirm-dialog { width: min(100%, 490px); padding: 27px; background: var(--surface); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 24px 60px rgba(23, 44, 76, 0.34); }
+.manual-lookup-dialog { width: min(100%, 530px); }
+.manual-lookup-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.manual-lookup-icon { color: var(--accent-dark); background: var(--accent-soft); border-color: var(--accent-border); }
+.manual-captcha-box { display: flex; align-items: center; gap: 12px; margin-top: 20px; padding: 14px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: var(--radius-control); }
+.manual-captcha-box img { display: block; width: 170px; min-height: 48px; object-fit: contain; background: #ffffff; border: 1px solid var(--line-strong); border-radius: 6px; image-rendering: auto; }
+.manual-captcha-box .outline-button { min-height: 35px; padding: 0 11px; white-space: nowrap; }
+.manual-captcha-input { display: grid; gap: 7px; margin-top: 16px; color: var(--ink-soft); font-size: 12px; font-weight: 650; }
+.manual-captcha-input input { width: 100%; min-height: 40px; padding: 0 12px; color: var(--ink); background: var(--surface-soft); border: 1px solid var(--line); border-radius: var(--radius-control); outline: 0; font-size: 14px; letter-spacing: 0.08em; }
+.manual-captcha-input input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
 .confirm-dialog-icon { display: grid; width: 44px; height: 44px; place-items: center; color: var(--danger); background: var(--danger-soft); border: 1px solid var(--danger-border); border-radius: 14px; }
 .confirm-dialog h2 { margin: 17px 0 0; color: var(--ink); font-size: 21px; font-weight: 720; letter-spacing: -0.03em; }
 .confirm-dialog p { margin: 10px 0 0; color: var(--ink-soft); font-size: 13px; line-height: 1.6; }

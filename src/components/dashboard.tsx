@@ -27,6 +27,7 @@ const DEFAULT_YEARS = ["2023", "2024", "2025", "2026"];
 const DEFAULT_YEAR = DEFAULT_YEARS[DEFAULT_YEARS.length - 1] ?? "2026";
 const PAGE_SIZE = 100;
 const MANUAL_REFRESH_INTERVAL_MS = 60_000;
+const MAX_CAPTCHA_FAILURES_BEFORE_REFRESH = 5;
 type ViewMode = DashboardView;
 
 function getLatestYear(years: string[]) {
@@ -60,6 +61,16 @@ type TaxpayerRow = {
 };
 
 type DeleteTarget = { taxCode: string; name: string | null };
+type ManualLookupState = {
+  taxCode: string;
+  challengeId: string;
+  captchaDataUrl: string;
+  captcha: string;
+  error: string | null;
+  captchaFailureCount: number;
+  requiresCaptchaRefresh: boolean;
+  isSubmitting: boolean;
+};
 type ActivityRow = {
   id: number;
   action: "taxpayer_added" | "taxpayer_deleted";
@@ -113,6 +124,28 @@ function formatSourceDate(value: string | null) {
   }).format(date);
 }
 
+function getVietnamQuarter(value: string | Date) {
+  const date = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return null;
+
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "numeric",
+  }).formatToParts(date);
+  const year = Number(parts.find((part) => part.type === "year")?.value);
+  const month = Number(parts.find((part) => part.type === "month")?.value);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return null;
+  return year * 4 + Math.floor((month - 1) / 3);
+}
+
+function isSourceDataStale(value: string | null) {
+  if (!value) return false;
+  const sourceQuarter = getVietnamQuarter(value);
+  const currentQuarter = getVietnamQuarter(new Date());
+  return sourceQuarter !== null && currentQuarter !== null && sourceQuarter < currentQuarter;
+}
+
 function statusClass(taxpayer: TaxpayerDetail | null) {
   if (taxpayer?.status_group === "active") return "status-badge status-success";
   if (taxpayer?.status_group === "inactive") return "status-badge status-danger";
@@ -144,6 +177,8 @@ export default function Dashboard({ username }: DashboardProps) {
   const [refreshAllProgress, setRefreshAllProgress] = useState<{ processed: number; pending: number } | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [updatingTaxCode, setUpdatingTaxCode] = useState<string | null>(null);
+  const [isStartingManualLookup, setIsStartingManualLookup] = useState(false);
+  const [manualLookup, setManualLookup] = useState<ManualLookupState | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [statusFilter, setStatusFilter] = useState("all");
   const [newTaxCode, setNewTaxCode] = useState("");
@@ -215,6 +250,11 @@ export default function Dashboard({ username }: DashboardProps) {
     } finally {
       setIsLoading(false);
     }
+  }
+
+  function patchTaxpayerDetail(taxCode: string, taxpayer: TaxpayerDetail | null | undefined) {
+    if (!taxpayer) return;
+    setRows((currentRows) => currentRows.map((row) => row.tax_code === taxCode ? { ...row, taxpayer } : row));
   }
 
   async function loadActivity() {
@@ -394,25 +434,126 @@ export default function Dashboard({ username }: DashboardProps) {
     window.location.href = "/login";
   }
 
-  async function refreshTaxpayer(taxCode: string) {
-    if (updatingTaxCode) return;
+  async function startManualLookup(taxCode: string, replaceExisting = false) {
+    if (isStartingManualLookup || (!replaceExisting && manualLookup)) return;
+
+    setIsStartingManualLookup(true);
     setUpdatingTaxCode(taxCode);
     setError(null);
+    setNotice(null);
     try {
-      const response = await fetch("/api/taxpayer/refresh", {
+      const response = await fetch("/api/taxpayer/manual-lookup", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ taxCode }),
+        body: JSON.stringify({ action: "start", taxCode }),
+        cache: "no-store",
       });
-      const payload = await response.json() as { error?: string; message?: string };
-      if (!response.ok && response.status !== 202) throw new Error(payload.error ?? "Không thể cập nhật MST.");
-      await loadData();
-      if (payload.message) setError(payload.message);
-    } catch (refreshError) {
-      setError(refreshError instanceof Error ? refreshError.message : "Không thể cập nhật MST.");
+      const payload = await response.json().catch(() => ({})) as {
+        error?: string;
+        challengeId?: string;
+        taxCode?: string;
+        captchaDataUrl?: string;
+      };
+      if (!response.ok) throw new Error(payload.error ?? "Không thể mở phiên tra cứu Cục Thuế.");
+      if (!payload.challengeId || !payload.captchaDataUrl) throw new Error("Cục Thuế chưa trả về mã CAPTCHA.");
+
+      setManualLookup({
+        taxCode: payload.taxCode ?? taxCode,
+        challengeId: payload.challengeId,
+        captchaDataUrl: payload.captchaDataUrl,
+        captcha: "",
+        error: null,
+        captchaFailureCount: 0,
+        requiresCaptchaRefresh: false,
+        isSubmitting: false,
+      });
+    } catch (lookupError) {
+      setError(lookupError instanceof Error ? lookupError.message : "Không thể mở phiên tra cứu Cục Thuế.");
     } finally {
-      setUpdatingTaxCode(null);
+      setIsStartingManualLookup(false);
+      setUpdatingTaxCode((current) => current === taxCode ? null : current);
     }
+  }
+
+  async function submitManualLookup() {
+    if (!manualLookup || manualLookup.isSubmitting) return;
+    const currentLookup = manualLookup;
+    if (!currentLookup.captcha.trim()) {
+      setManualLookup((current) => current ? { ...current, error: "Vui lòng nhập mã CAPTCHA." } : current);
+      return;
+    }
+
+    setManualLookup((current) => current ? { ...current, error: null, isSubmitting: true } : current);
+    setError(null);
+    try {
+      const response = await fetch("/api/taxpayer/manual-lookup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "submit",
+          taxCode: currentLookup.taxCode,
+          challengeId: currentLookup.challengeId,
+          captcha: currentLookup.captcha,
+        }),
+        cache: "no-store",
+      });
+      const payload = await response.json().catch(() => ({})) as {
+        error?: string;
+        message?: string;
+        captchaDataUrl?: string;
+        captchaInvalid?: boolean;
+        retryRequired?: boolean;
+        taxpayer?: TaxpayerDetail;
+      };
+
+      if (response.status === 422 && (payload.captchaInvalid || payload.retryRequired)) {
+        setManualLookup((current) => {
+          if (!current) return current;
+          const captchaFailureCount = current.captchaFailureCount
+            + (payload.captchaInvalid ? 1 : 0);
+          const requiresCaptchaRefresh = captchaFailureCount >= MAX_CAPTCHA_FAILURES_BEFORE_REFRESH;
+          return {
+            ...current,
+            captchaDataUrl: payload.captchaDataUrl ?? current.captchaDataUrl,
+            captcha: "",
+            error: payload.captchaInvalid
+              ? requiresCaptchaRefresh
+                ? `Cục Thuế đã từ chối CAPTCHA ${MAX_CAPTCHA_FAILURES_BEFORE_REFRESH} lần. Vui lòng bấm \"Mã khác\" để đổi CAPTCHA trước khi tiếp tục.`
+                : `Cục Thuế từ chối mã CAPTCHA. Vui lòng nhập lại theo ảnh mới (lần thử ${captchaFailureCount}/${MAX_CAPTCHA_FAILURES_BEFORE_REFRESH}).`
+              : payload.error ?? "Cục Thuế trả về dữ liệu chưa hoàn chỉnh. Vui lòng thử lại.",
+            captchaFailureCount,
+            requiresCaptchaRefresh,
+            isSubmitting: false,
+          };
+        });
+        return;
+      }
+      if (response.status === 410) {
+        setManualLookup(null);
+        throw new Error(payload.error ?? "Phiên CAPTCHA đã hết hạn. Vui lòng thử lại.");
+      }
+      if (response.status === 404) {
+        setManualLookup(null);
+        setError(payload.error ?? "Cục Thuế không tìm thấy thông tin cho MST này.");
+        return;
+      }
+      if (!response.ok) throw new Error(payload.error ?? "Không thể hoàn tất tra cứu Cục Thuế.");
+
+      setManualLookup(null);
+      patchTaxpayerDetail(currentLookup.taxCode, payload.taxpayer);
+      setNotice(payload.message ?? "Đã hoàn tất tra cứu Cục Thuế.");
+    } catch (lookupError) {
+      setManualLookup((current) => current ? {
+        ...current,
+        error: lookupError instanceof Error ? lookupError.message : "Không thể hoàn tất tra cứu Cục Thuế.",
+        isSubmitting: false,
+      } : current);
+    }
+  }
+
+  async function refreshTaxpayer(row: TaxpayerRow) {
+    if (updatingTaxCode || isStartingManualLookup || manualLookup) return;
+    await startManualLookup(row.tax_code);
   }
 
   function resetTaxCodeLookup(clearName = false) {
@@ -681,11 +822,13 @@ export default function Dashboard({ username }: DashboardProps) {
                   {isLoading ? <TableSkeleton /> : filteredRows.length === 0 ? <tr><td colSpan={7}><div className="table-empty"><FileText size={26} /><strong>Chưa có dữ liệu để hiển thị</strong><span>Dữ liệu sẽ xuất hiện sau khi migration và seed Supabase hoàn tất.</span></div></td></tr> : pagedRows.map((row) => {
                     const detail = row.taxpayer;
                     const isExpanded = expandedRow === row.id;
+                    const sourceIsStale = isSourceDataStale(detail?.source_updated_at ?? null);
+                    const refreshTitle = `Tra cứu thủ công tại Cục Thuế cho ${row.tax_code}`;
                     return <Fragment key={row.id}>
                       <tr key={row.id} className={`data-row ${isExpanded ? "data-row-expanded" : ""}`} onClick={() => setExpandedRow(isExpanded ? null : row.id)}>
                         <td className="col-expand"><CaretRight size={16} className={isExpanded ? "caret-open" : ""} /></td>
-                        <td className="tax-code-cell"><div className="tax-code-with-action"><span>{row.tax_code}</span><button className="row-update-button" type="button" title={`Cập nhật ${row.tax_code}`} aria-label={`Cập nhật ${row.tax_code}`} disabled={Boolean(updatingTaxCode) || isRefreshingAll} onClick={(event) => { event.stopPropagation(); void refreshTaxpayer(row.tax_code); }}><ArrowsClockwise size={13} className={updatingTaxCode === row.tax_code ? "update-icon-spinning" : ""} /></button><button className="row-delete-button" type="button" title={`Xóa toàn bộ MST ${row.tax_code}`} aria-label={`Xóa toàn bộ MST ${row.tax_code}`} disabled={isDeleting || isRefreshingAll} onClick={(event) => { event.stopPropagation(); openDeleteDialog(row); }}><Trash size={13} /></button></div></td>
-                        <td><strong>{detail?.name ?? row.source_vendor_name ?? "Chưa có tên"}</strong><small>{detail?.address ?? ""}</small></td>
+                        <td className="tax-code-cell"><div className="tax-code-with-action"><span>{row.tax_code}</span><button className="row-update-button" type="button" title={refreshTitle} aria-label={refreshTitle} disabled={Boolean(updatingTaxCode) || isStartingManualLookup || Boolean(manualLookup) || isRefreshingAll} onClick={(event) => { event.stopPropagation(); void refreshTaxpayer(row); }}><ArrowsClockwise size={13} className={updatingTaxCode === row.tax_code ? "update-icon-spinning" : ""} /></button><button className="row-delete-button" type="button" title={`Xóa toàn bộ MST ${row.tax_code}`} aria-label={`Xóa toàn bộ MST ${row.tax_code}`} disabled={isDeleting || isRefreshingAll || Boolean(manualLookup)} onClick={(event) => { event.stopPropagation(); openDeleteDialog(row); }}><Trash size={13} /></button></div></td>
+                        <td><strong>{detail?.name ?? row.source_vendor_name ?? "Chưa có tên"}</strong>{sourceIsStale ? <small className="stale-source-label">Dữ liệu cũ</small> : null}<small>{detail?.address ?? ""}</small></td>
                         <td><span className="sheet-label">{row.source_sheet}</span></td>
                         <td><span className={statusClass(detail)}>{statusLabel(detail)}</span></td>
                         <td className="date-cell">{formatDate(detail?.last_checked_at ?? null)}</td>
@@ -702,6 +845,17 @@ export default function Dashboard({ username }: DashboardProps) {
           </> : null}
         </main>
       </div>
+      {manualLookup ? <div className="confirm-backdrop">
+        <section className="confirm-dialog manual-lookup-dialog" role="dialog" aria-modal="true" aria-labelledby="manual-lookup-dialog-title" aria-describedby="manual-lookup-dialog-description">
+          <div className="manual-lookup-heading"><div className="confirm-dialog-icon manual-lookup-icon"><MagnifyingGlass size={22} weight="duotone" /></div><button className="icon-button" type="button" aria-label="Đóng tra cứu thủ công" disabled={manualLookup.isSubmitting} onClick={() => setManualLookup(null)}><X size={17} /></button></div>
+          <h2 id="manual-lookup-dialog-title">Tra cứu trực tiếp Cục Thuế</h2>
+          <p id="manual-lookup-dialog-description">MST <strong>{manualLookup.taxCode}</strong>. Nhập mã CAPTCHA trong ảnh để đối chiếu với dữ liệu hiện tại.</p>
+          <div className="manual-captcha-box"><img src={manualLookup.captchaDataUrl} alt="Mã CAPTCHA từ trang Cục Thuế" /><button className="outline-button" type="button" disabled={manualLookup.isSubmitting || isStartingManualLookup} onClick={() => void startManualLookup(manualLookup.taxCode, true)}><ArrowsClockwise size={15} className={isStartingManualLookup ? "update-icon-spinning" : ""} /> Mã khác</button></div>
+          <label className="manual-captcha-input"><span>Mã xác nhận</span><input value={manualLookup.captcha} onChange={(event) => setManualLookup((current) => current ? { ...current, captcha: event.target.value, error: null } : current)} disabled={manualLookup.requiresCaptchaRefresh} autoComplete="off" autoFocus maxLength={16} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void submitManualLookup(); } }} /></label>
+          {manualLookup.error ? <div className="confirm-error"><WarningCircle size={16} /> {manualLookup.error}</div> : null}
+          <div className="confirm-actions"><button className="outline-button" type="button" disabled={manualLookup.isSubmitting} onClick={() => setManualLookup(null)}>Hủy</button><button className="export-button" type="button" disabled={manualLookup.isSubmitting || isStartingManualLookup || manualLookup.requiresCaptchaRefresh} onClick={() => void submitManualLookup()}>{manualLookup.isSubmitting ? "Đang đối chiếu..." : "Tra cứu"}</button></div>
+        </section>
+      </div> : null}
       {deleteTarget ? <div className="confirm-backdrop">
         <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title" aria-describedby="delete-dialog-description">
           <div className="confirm-dialog-icon"><WarningCircle size={23} weight="duotone" /></div>

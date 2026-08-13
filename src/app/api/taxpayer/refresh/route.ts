@@ -7,6 +7,31 @@ import { invokeTaxpayerRefresh } from "@/lib/xinvoice-worker";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+type TaxpayerDetail = {
+  tax_code: string;
+  name: string | null;
+  org_type: string | null;
+  address: string | null;
+  tax_department: string | null;
+  status: string | null;
+  status_group: string | null;
+  source_updated_at: string | null;
+  previous_checked_at: string | null;
+  last_checked_at: string | null;
+  status_changed_at: string | null;
+  last_error: string | null;
+};
+
+async function readTaxpayerDetail(supabase: ReturnType<typeof createAdminClient>, taxCode: string) {
+  const { data, error } = await supabase
+    .from("taxpayers")
+    .select("tax_code, name, org_type, address, tax_department, status, status_group, source_updated_at, previous_checked_at, last_checked_at, status_changed_at, last_error")
+    .eq("tax_code", taxCode)
+    .maybeSingle<TaxpayerDetail>();
+  if (error) console.error("updated taxpayer detail read failed", error);
+  return data;
+}
+
 export async function POST(request: Request) {
   if (!(await authenticateRequest(request))) {
     return NextResponse.json({ error: "Bạn cần đăng nhập." }, { status: 401 });
@@ -61,7 +86,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: result.error ?? "Không thể cập nhật MST." }, { status: 502 });
     }
 
-    return NextResponse.json({ ok: true, taxCode, updated: !result.skipped, skipped: Boolean(result.skipped) });
+    const updatedTaxpayer = await readTaxpayerDetail(supabase, taxCode);
+    return NextResponse.json({
+      ok: true,
+      taxCode,
+      updated: !result.skipped,
+      skipped: Boolean(result.skipped),
+      taxpayer: updatedTaxpayer,
+    });
   } catch (error) {
     console.error("manual taxpayer refresh failed", error);
     return NextResponse.json({

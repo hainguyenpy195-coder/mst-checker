@@ -3,15 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "dev": "node scripts/next-with-system-ca.mjs dev",
+    "build": "node scripts/next-with-system-ca.mjs build",
+    "start": "node scripts/next-with-system-ca.mjs start",
     "typecheck": "tsc --noEmit",
     "generate:seed": "node scripts/generate-seed.mjs"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
     "@supabase/supabase-js": "^2.112.3",
+    "cheerio": "^1.2.0",
     "exceljs": "^4.4.0",
     "next": "^16.3.0",
     "react": "^19.2.8",

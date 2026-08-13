@@ -8,7 +8,8 @@ service-role refresh request function used by the Vercel API. The third keeps
 the older due-date helper for compatibility. The fourth adds targeted claims
 and the monthly dispatcher. The fifth ensures retry jobs are not starved by
 the initial backfill queue. The eighth disables the old scheduled refresh
-jobs; refreshes are now started manually from the application.
+jobs; refreshes are now started manually from the application. The ninth adds
+short-lived server-side sessions for the user-assisted Cục Thuế CAPTCHA flow.
 
 ## Initial data
 

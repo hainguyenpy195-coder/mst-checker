@@ -32,6 +32,7 @@ Mở `http://localhost:3000`.
   - `supabase/migrations/202608130006_endpoint_settings.sql`
   - `supabase/migrations/202608130007_taxpayer_activity_logs.sql`
   - `supabase/migrations/202608130008_manual_refresh_only.sql`
+  - `supabase/migrations/202608130009_manual_gdt_lookup_sessions.sql`
 3. Tạo seed cục bộ từ workbook:
 
    ```powershell
