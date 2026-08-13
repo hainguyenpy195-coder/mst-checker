@@ -309,8 +309,6 @@ button:not(:disabled):active { transform: translateY(1px); }
   .mobile-nav-link svg { transition: color 150ms ease, transform 150ms ease; }
   .mobile-nav-link-active { color: var(--accent-dark); background: var(--accent-soft); }
   .mobile-nav-link-active svg { transform: translateY(-1px); }
-  .mobile-bento-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-  .mobile-lookup-card, .mobile-quick-actions { grid-column: 1 / -1; }
   .mobile-lookup-card { display: grid; gap: 15px; padding: 18px; background: var(--surface); border: 1px solid var(--accent-border); border-radius: 18px; box-shadow: var(--shadow-soft); }
   .mobile-section-eyebrow { display: block; color: var(--accent-dark); font-size: 10px; font-weight: 760; letter-spacing: 0.1em; }
   .mobile-lookup-card h2, .mobile-lookup-results h2 { margin: 6px 0 0; color: var(--ink); font-size: 20px; font-weight: 730; letter-spacing: -0.03em; }
@@ -325,19 +323,6 @@ button:not(:disabled):active { transform: translateY(1px); }
   .mobile-lookup-footer > span { color: var(--muted); font-size: 11px; line-height: 1.4; }
   .mobile-search-submit { min-height: 40px; flex: 0 0 auto; padding: 0 14px; color: #ffffff; background: var(--accent); border: 1px solid var(--accent); border-radius: var(--radius-control); font-size: 12px; font-weight: 680; }
   .mobile-search-submit:hover { background: var(--accent-dark); border-color: var(--accent-dark); }
-  .mobile-bento-summary { display: grid; align-content: start; min-height: 112px; padding: 15px; border: 1px solid var(--line); border-radius: 15px; }
-  .mobile-bento-summary-primary { grid-column: 1 / -1; background: var(--accent-soft); border-color: var(--accent-border); }
-  .mobile-bento-summary-success { background: var(--success-soft); border-color: var(--success-border); }
-  .mobile-bento-summary-warning { background: var(--warning-soft); border-color: var(--warning-border); }
-  .mobile-bento-summary span { color: var(--ink-soft); font-size: 11px; font-weight: 680; }
-  .mobile-bento-summary strong { margin-top: 8px; color: var(--ink); font-size: 27px; font-weight: 740; letter-spacing: -0.045em; font-variant-numeric: tabular-nums; }
-  .mobile-bento-summary small { margin-top: 4px; color: var(--muted); font-size: 10px; line-height: 1.35; }
-  .mobile-bento-control { display: grid; gap: 7px; min-width: 0; padding: 13px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; color: var(--ink-soft); font-size: 11px; font-weight: 680; }
-  .mobile-bento-control-wide { grid-column: 1 / -1; }
-  .mobile-bento-control select { width: 100%; min-width: 0; min-height: 34px; padding: 0 8px; color: var(--ink); background: var(--surface-soft); border: 1px solid var(--line); border-radius: 8px; outline: 0; font-size: 12px; }
-  .mobile-bento-control select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
-  .mobile-quick-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-  .mobile-quick-actions button { min-width: 0; min-height: 44px; padding: 0 10px; font-size: 12px; }
   .mobile-inline-alert { display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; padding: 12px 13px; color: var(--danger); background: var(--danger-soft); border: 1px solid var(--danger-border); border-radius: var(--radius-control); font-size: 12px; line-height: 1.45; }
   .mobile-inline-alert svg { flex: 0 0 auto; margin-top: 1px; }
   .mobile-lookup-results { margin-top: 14px; padding: 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow-soft); }

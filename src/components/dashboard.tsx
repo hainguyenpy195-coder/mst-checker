@@ -153,6 +153,11 @@ function statusClass(taxpayer: TaxpayerDetail | null) {
   return "status-badge status-warning";
 }
 
+function matchesTaxpayerQuery(row: TaxpayerRow, needle: string) {
+  return !needle || [row.tax_code, row.source_vendor_name, row.taxpayer?.name, row.taxpayer?.status]
+    .some((value) => value?.toLowerCase().includes(needle));
+}
+
 function activityLabel(action: ActivityRow["action"]) {
   return action === "taxpayer_added" ? "Đã thêm" : "Đã xóa";
 }
@@ -313,14 +318,19 @@ export default function Dashboard({ username }: DashboardProps) {
   const filteredRows = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return displayRows.filter((row) => {
-      const matchesText = !needle || [row.tax_code, row.source_vendor_name, row.taxpayer?.name, row.taxpayer?.status]
-        .some((value) => value?.toLowerCase().includes(needle));
+      const matchesText = matchesTaxpayerQuery(row, needle);
       const matchesStatus = statusFilter === "all"
         || (statusFilter === "error" && Boolean(row.taxpayer?.last_error))
         || (row.taxpayer?.status_group ?? "unknown") === statusFilter;
       return matchesText && matchesStatus;
     });
   }, [displayRows, query, statusFilter]);
+
+  const mobileLookupRows = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return [];
+    return displayRows.filter((row) => matchesTaxpayerQuery(row, needle));
+  }, [displayRows, query]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -812,14 +822,10 @@ export default function Dashboard({ username }: DashboardProps) {
           {isDataView ? <>
           <MobileLookupPanel
             viewMode={viewMode}
-            years={years}
             selectedYear={selectedYear}
-            displayRows={displayRows}
-            filteredRows={filteredRows}
+            lookupRows={mobileLookupRows}
             query={query}
-            statusFilter={statusFilter}
             isLoading={isLoading}
-            isExporting={isExporting}
             isRefreshingAll={isRefreshingAll}
             isStartingManualLookup={isStartingManualLookup}
             isManualLookupOpen={Boolean(manualLookup)}
@@ -830,10 +836,6 @@ export default function Dashboard({ username }: DashboardProps) {
             onQueryChange={(value) => setQuery(value)}
             onSearch={search}
             onClearSearch={() => clearSearch(false)}
-            onStatusFilterChange={(value) => setStatusFilter(value)}
-            onSelectYear={selectYear}
-            onToggleAdd={toggleAddForm}
-            onExport={() => void exportWorkbook()}
             onToggleRow={(rowId) => setExpandedRow((current) => current === rowId ? null : rowId)}
             onRefresh={(row) => void refreshTaxpayer(row)}
             onDelete={openDeleteDialog}
@@ -933,14 +935,10 @@ export default function Dashboard({ username }: DashboardProps) {
 
 type MobileLookupPanelProps = {
   viewMode: ViewMode;
-  years: string[];
   selectedYear: string;
-  displayRows: TaxpayerRow[];
-  filteredRows: TaxpayerRow[];
+  lookupRows: TaxpayerRow[];
   query: string;
-  statusFilter: string;
   isLoading: boolean;
-  isExporting: boolean;
   isRefreshingAll: boolean;
   isStartingManualLookup: boolean;
   isManualLookupOpen: boolean;
@@ -951,10 +949,6 @@ type MobileLookupPanelProps = {
   onQueryChange: (value: string) => void;
   onSearch: (event: FormEvent<HTMLFormElement>) => void;
   onClearSearch: () => void;
-  onStatusFilterChange: (value: string) => void;
-  onSelectYear: (year: string) => void;
-  onToggleAdd: () => void;
-  onExport: () => void;
   onToggleRow: (rowId: number) => void;
   onRefresh: (row: TaxpayerRow) => void;
   onDelete: (row: TaxpayerRow) => void;
@@ -962,14 +956,10 @@ type MobileLookupPanelProps = {
 
 function MobileLookupPanel({
   viewMode,
-  years,
   selectedYear,
-  displayRows,
-  filteredRows,
+  lookupRows,
   query,
-  statusFilter,
   isLoading,
-  isExporting,
   isRefreshingAll,
   isStartingManualLookup,
   isManualLookupOpen,
@@ -980,88 +970,38 @@ function MobileLookupPanel({
   onQueryChange,
   onSearch,
   onClearSearch,
-  onStatusFilterChange,
-  onSelectYear,
-  onToggleAdd,
-  onExport,
   onToggleRow,
   onRefresh,
   onDelete,
 }: MobileLookupPanelProps) {
-  const activeCount = displayRows.filter((row) => row.taxpayer?.status_group === "active").length;
-  const attentionCount = displayRows.filter((row) => Boolean(row.taxpayer?.last_error)
-    || isSourceDataStale(row.taxpayer?.source_updated_at ?? null)).length;
   const hasTextQuery = Boolean(query.trim());
-  const hasLookupCriteria = hasTextQuery || statusFilter !== "all";
-  const mobileResults = filteredRows.slice(0, 20);
-  const resultTitle = hasTextQuery ? "Kết quả tra cứu" : "Kết quả lọc";
-  const totalLabel = viewMode === "sheets" ? `MST năm ${selectedYear}` : "MST đang theo dõi";
+  const mobileResults = lookupRows.slice(0, 20);
 
   return <section className="mobile-dashboard" aria-label="Tra cứu nhanh trên di động">
-    <div className="mobile-bento-grid">
-      <form className="mobile-lookup-card" onSubmit={onSearch}>
-        <div>
-          <span className="mobile-section-eyebrow">TRA CỨU NHANH</span>
-          <h2>Tìm nhà cung ứng</h2>
-          <p>Tra cứu theo mã số thuế hoặc tên nhà cung ứng.</p>
-        </div>
-        <div className="mobile-search-box">
-          <MagnifyingGlass size={19} aria-hidden="true" />
-          <input
-            type="search"
-            value={query}
-            onChange={(event) => onQueryChange(event.target.value)}
-            placeholder="Mã số thuế hoặc tên nhà cung ứng"
-            aria-label="Tra cứu theo mã số thuế hoặc tên nhà cung ứng"
-            aria-describedby="mobile-quick-lookup-hint"
-            enterKeyHint="search"
-          />
-          <button type="button" className="mobile-search-clear" aria-label="Xóa nội dung tra cứu" disabled={!query} onClick={onClearSearch}><X size={17} /></button>
-        </div>
-        <div className="mobile-lookup-footer">
-          <span id="mobile-quick-lookup-hint">Kết quả được lọc ngay khi bạn nhập.</span>
-          <button className="mobile-search-submit" type="submit">Tra cứu</button>
-        </div>
-      </form>
-
-      <div className="mobile-bento-summary mobile-bento-summary-primary">
-        <span>{totalLabel}</span>
-        <strong>{displayRows.length.toLocaleString("vi-VN")}</strong>
-        <small>{viewMode === "sheets" ? `Danh sách nguồn năm ${selectedYear}` : "Danh mục tổng hợp hiện tại"}</small>
+    <form className="mobile-lookup-card" onSubmit={onSearch}>
+      <div>
+        <span className="mobile-section-eyebrow">TRA CỨU NHANH</span>
+        <h2>Tìm nhà cung ứng</h2>
+        <p>Tra cứu theo mã số thuế hoặc tên nhà cung ứng.</p>
       </div>
-      <div className="mobile-bento-summary mobile-bento-summary-success">
-        <span>Đang hoạt động</span>
-        <strong>{activeCount.toLocaleString("vi-VN")}</strong>
-        <small>Đã xác nhận trạng thái</small>
+      <div className="mobile-search-box">
+        <MagnifyingGlass size={19} aria-hidden="true" />
+        <input
+          type="search"
+          value={query}
+          onChange={(event) => onQueryChange(event.target.value)}
+          placeholder="Mã số thuế hoặc tên nhà cung ứng"
+          aria-label="Tra cứu theo mã số thuế hoặc tên nhà cung ứng"
+          aria-describedby="mobile-quick-lookup-hint"
+          enterKeyHint="search"
+        />
+        <button type="button" className="mobile-search-clear" aria-label="Xóa nội dung tra cứu" disabled={!query} onClick={onClearSearch}><X size={17} /></button>
       </div>
-      <div className="mobile-bento-summary mobile-bento-summary-warning">
-        <span>Cần xem lại</span>
-        <strong>{attentionCount.toLocaleString("vi-VN")}</strong>
-        <small>Lỗi hoặc nguồn dữ liệu cũ</small>
+      <div className="mobile-lookup-footer">
+        <span id="mobile-quick-lookup-hint">Kết quả được lọc ngay khi bạn nhập.</span>
+        <button className="mobile-search-submit" type="submit">Tra cứu</button>
       </div>
-
-      <label className={`mobile-bento-control ${viewMode === "overview" ? "mobile-bento-control-wide" : ""}`}>
-        <span>Tình trạng</span>
-        <select value={statusFilter} onChange={(event) => onStatusFilterChange(event.target.value)} aria-label="Lọc theo tình trạng">
-          <option value="all">Tất cả</option>
-          <option value="active">Đang hoạt động</option>
-          <option value="inactive">Không hoạt động</option>
-          <option value="unknown">Chưa có dữ liệu</option>
-          <option value="error">Có lỗi</option>
-        </select>
-      </label>
-      {viewMode === "sheets" ? <label className="mobile-bento-control">
-        <span>Năm theo dõi</span>
-        <select value={selectedYear} onChange={(event) => onSelectYear(event.target.value)} aria-label="Chọn năm theo dõi">
-          {years.map((year) => <option key={year} value={year}>{year}</option>)}
-        </select>
-      </label> : null}
-
-      <div className="mobile-quick-actions" aria-label="Thao tác danh mục">
-        <button className="outline-button" type="button" onClick={onToggleAdd} disabled={isRefreshingAll}><Plus size={17} /> Thêm MST</button>
-        <button className="export-button" type="button" onClick={onExport} disabled={isExporting || isRefreshingAll}><DownloadSimple size={17} /> {isExporting ? "Đang xuất" : "Xuất Excel"}</button>
-      </div>
-    </div>
+    </form>
 
     {error ? <div className="mobile-inline-alert" role="alert"><WarningCircle size={18} /> {error}</div> : null}
 
@@ -1069,18 +1009,18 @@ function MobileLookupPanel({
       <div className="mobile-results-heading">
         <div>
           <span className="mobile-section-eyebrow">{viewMode === "sheets" ? `NĂM ${selectedYear}` : "DANH MỤC"}</span>
-          <h2 id="mobile-lookup-results-title">{resultTitle}</h2>
+          <h2 id="mobile-lookup-results-title">Kết quả tra cứu</h2>
         </div>
-        {hasLookupCriteria && !isLoading ? <span className="mobile-results-count">{filteredRows.length.toLocaleString("vi-VN")} kết quả</span> : null}
+        {hasTextQuery && !isLoading ? <span className="mobile-results-count">{lookupRows.length.toLocaleString("vi-VN")} kết quả</span> : null}
       </div>
 
       {isLoading ? <div className="mobile-results-skeleton" aria-label="Đang tải dữ liệu">
         {[1, 2, 3].map((item) => <div key={item} />)}
-      </div> : !hasLookupCriteria ? <div className="mobile-empty-state">
+      </div> : !hasTextQuery ? <div className="mobile-empty-state">
         <MagnifyingGlass size={25} weight="duotone" />
         <strong>Nhập thông tin để bắt đầu</strong>
         <span>Tìm theo MST hoặc tên nhà cung ứng để xem kết quả gọn trên điện thoại.</span>
-      </div> : filteredRows.length === 0 ? <div className="mobile-empty-state">
+      </div> : lookupRows.length === 0 ? <div className="mobile-empty-state">
         <FileText size={25} weight="duotone" />
         <strong>Chưa tìm thấy bản ghi phù hợp</strong>
         <span>Thử lại bằng MST, tên nhà cung ứng hoặc thay đổi bộ lọc tình trạng.</span>
@@ -1096,7 +1036,7 @@ function MobileLookupPanel({
           onRefresh={() => onRefresh(row)}
           onDelete={() => onDelete(row)}
         />)}
-        {filteredRows.length > mobileResults.length ? <p className="mobile-results-limit">Hiển thị 20 kết quả đầu tiên. Hãy nhập thêm ký tự để thu hẹp kết quả.</p> : null}
+        {lookupRows.length > mobileResults.length ? <p className="mobile-results-limit">Hiển thị 20 kết quả đầu tiên. Hãy nhập thêm ký tự để thu hẹp kết quả.</p> : null}
       </div>}
     </section>
   </section>;
