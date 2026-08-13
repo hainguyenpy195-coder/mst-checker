@@ -100,9 +100,15 @@ function statusLabel(taxpayer: TaxpayerDetail | null) {
   return taxpayer.status;
 }
 
-function endpointUpdatedAtNote(taxpayer: TaxpayerDetail | null) {
-  if (!taxpayer?.source_updated_at) return null;
-  return `Dữ liệu endpoint (updatedAt): ${formatDate(taxpayer.source_updated_at)}`;
+function formatSourceDate(value: string | null) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("vi-VN", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(date);
 }
 
 function statusClass(taxpayer: TaxpayerDetail | null) {
@@ -194,7 +200,10 @@ export default function Dashboard({ username }: DashboardProps) {
       const payload = await response.json() as { rows?: TaxpayerRow[]; summary?: Summary; years?: string[]; error?: string };
       if (!response.ok) throw new Error(payload.error ?? "Không thể tải danh sách.");
       setRows(payload.rows ?? []);
-      if (activeYear === "all") setOverviewSummary(payload.summary ?? EMPTY_SUMMARY);
+      if (activeYear === "all" && !overviewSummaryLoaded.current) {
+        overviewSummaryLoaded.current = true;
+        setOverviewSummary(payload.summary ?? EMPTY_SUMMARY);
+      }
       if (payload.years?.length) {
         setYears(payload.years);
         if (viewMode === "sheets" && !payload.years.includes(selectedYear)) {
@@ -667,7 +676,6 @@ export default function Dashboard({ username }: DashboardProps) {
               <h1>{viewMode === "overview" ? "Bảng tổng hợp" : viewMode === "sheets" ? `Danh sách MST năm ${selectedYear}` : viewMode === "activity" ? "Lịch sử thao tác" : "Cấu hình"}</h1>
             </div>
             {viewMode === "overview" || viewMode === "sheets" ? <div className="heading-actions">
-              {viewMode === "overview" ? <button className="outline-button" type="button" onClick={() => void refreshAllTaxpayers()} disabled={isRefreshingAll}><ArrowsClockwise size={17} className={isRefreshingAll ? "update-icon-spinning" : ""} /> {isRefreshingAll ? `Đang cập nhật${refreshAllProgress ? ` (${refreshAllProgress.processed} / còn ${refreshAllProgress.pending})` : "..."}` : "Cập nhật toàn bộ"}</button> : null}
               <button className="outline-button" type="button" onClick={toggleAddForm} disabled={isRefreshingAll}><Plus size={17} /> Thêm MST</button>
               <button className="export-button" type="button" onClick={() => void exportWorkbook()} disabled={isExporting || isRefreshingAll}><DownloadSimple size={17} /> {isExporting ? "Đang xuất" : "Xuất Excel"}</button>
             </div> : null}
@@ -677,7 +685,7 @@ export default function Dashboard({ username }: DashboardProps) {
 
           {notice ? <div className="page-notice page-notice-success" role="status"><CheckCircle size={18} /> {notice}</div> : null}
 
-          {viewMode === "settings" ? <EndpointSettingsPanel /> : null}
+          {viewMode === "settings" ? <EndpointSettingsPanel onRefreshAll={() => void refreshAllTaxpayers()} isRefreshingAll={isRefreshingAll} refreshAllProgress={refreshAllProgress} /> : null}
 
           {viewMode === "activity" ? <ActivityPanel rows={activityRows} isLoading={isActivityLoading} error={activityError} /> : null}
 
@@ -700,12 +708,11 @@ export default function Dashboard({ username }: DashboardProps) {
             {error ? <div className="table-alert"><WarningCircle size={18} /> {error}</div> : null}
             <div className="table-scroll">
               <table className="data-table">
-                <thead><tr><th className="col-expand" /><th>Mã số thuế</th><th>Tên người nộp thuế</th><th>Năm nguồn</th><th>Tình trạng</th><th title="Lần hệ thống tra cứu endpoint gần nhất">Tra cứu lúc</th><th>Ghi chú</th></tr></thead>
+                <thead><tr><th className="col-expand" /><th>Mã số thuế</th><th>Tên người nộp thuế</th><th>Năm nguồn</th><th>Tình trạng</th><th title="Lần hệ thống tra cứu endpoint gần nhất">Tra cứu lúc</th><th>Nguồn dữ liệu</th></tr></thead>
                 <tbody>
                   {isLoading ? <TableSkeleton /> : filteredRows.length === 0 ? <tr><td colSpan={7}><div className="table-empty"><FileText size={26} /><strong>Chưa có dữ liệu để hiển thị</strong><span>Dữ liệu sẽ xuất hiện sau khi migration và seed Supabase hoàn tất.</span></div></td></tr> : pagedRows.map((row) => {
                     const detail = row.taxpayer;
                     const isExpanded = expandedRow === row.id;
-                    const note = [row.source_note, endpointUpdatedAtNote(detail), detail?.last_error].filter(Boolean).join(" | ");
                     return <Fragment key={row.id}>
                       <tr key={row.id} className={`data-row ${isExpanded ? "data-row-expanded" : ""}`} onClick={() => setExpandedRow(isExpanded ? null : row.id)}>
                         <td className="col-expand"><CaretRight size={16} className={isExpanded ? "caret-open" : ""} /></td>
@@ -714,7 +721,7 @@ export default function Dashboard({ username }: DashboardProps) {
                         <td><span className="sheet-label">{row.source_sheet}</span></td>
                         <td><span className={statusClass(detail)}>{statusLabel(detail)}</span></td>
                         <td className="date-cell">{formatDate(detail?.last_checked_at ?? null)}</td>
-                        <td className="note-cell">{note}</td>
+                        <td className="note-cell">{formatSourceDate(detail?.source_updated_at ?? null)}</td>
                       </tr>
                       {isExpanded ? <tr key={`${row.id}-detail`} className="detail-row"><td colSpan={7}><DetailPanel row={row} /></td></tr> : null}
                     </Fragment>;
@@ -768,7 +775,13 @@ function DetailItem({ label, value, mono = false, wide = false }: { label: strin
   return <div className={wide ? "detail-item detail-item-wide" : "detail-item"}><span>{label}</span><strong className={mono ? "mono-value" : ""}>{value || "Chưa có"}</strong></div>;
 }
 
-function EndpointSettingsPanel() {
+type EndpointSettingsPanelProps = {
+  onRefreshAll: () => void;
+  isRefreshingAll: boolean;
+  refreshAllProgress: { processed: number; pending: number } | null;
+};
+
+function EndpointSettingsPanel({ onRefreshAll, isRefreshingAll, refreshAllProgress }: EndpointSettingsPanelProps) {
   const [primaryEndpoint, setPrimaryEndpoint] = useState("");
   const [fallbackEndpoint, setFallbackEndpoint] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -818,7 +831,7 @@ function EndpointSettingsPanel() {
     }
   }
 
-  return <section className="settings-panel" aria-labelledby="endpoint-settings-title"><div className="settings-heading"><h2 id="endpoint-settings-title">Endpoint</h2></div>{isLoading ? <div className="settings-loading">Đang tải cấu hình...</div> : <form className="settings-form" onSubmit={saveSettings}><label><span>Endpoint chính</span><input value={primaryEndpoint} onChange={(event) => setPrimaryEndpoint(event.target.value)} placeholder="https://.../{taxCode}" required /></label><label><span>Endpoint dự phòng</span><input value={fallbackEndpoint} onChange={(event) => setFallbackEndpoint(event.target.value)} placeholder="https://.../{taxCode}" required /></label><div className="settings-actions"><button className="export-button" type="submit" disabled={isSaving}>{isSaving ? "Đang lưu..." : "Lưu cấu hình"}</button></div>{settingsError ? <p className="settings-error"><WarningCircle size={16} /> {settingsError}</p> : null}{settingsMessage ? <p className="settings-success"><CheckCircle size={16} /> {settingsMessage}</p> : null}</form>}</section>;
+  return <section className="settings-panel" aria-labelledby="endpoint-settings-title"><div className="settings-heading"><h2 id="endpoint-settings-title">Endpoint</h2><button className="outline-button" type="button" onClick={onRefreshAll} disabled={isRefreshingAll}><ArrowsClockwise size={17} className={isRefreshingAll ? "update-icon-spinning" : ""} /> {isRefreshingAll ? `Đang cập nhật${refreshAllProgress ? ` (${refreshAllProgress.processed} / còn ${refreshAllProgress.pending})` : "..."}` : "Cập nhật toàn bộ"}</button></div>{isLoading ? <div className="settings-loading">Đang tải cấu hình...</div> : <form className="settings-form" onSubmit={saveSettings}><label><span>Endpoint chính</span><input value={primaryEndpoint} onChange={(event) => setPrimaryEndpoint(event.target.value)} placeholder="https://.../{taxCode}" required /></label><label><span>Endpoint dự phòng</span><input value={fallbackEndpoint} onChange={(event) => setFallbackEndpoint(event.target.value)} placeholder="https://.../{taxCode}" required /></label><div className="settings-actions"><button className="export-button" type="submit" disabled={isSaving}>{isSaving ? "Đang lưu..." : "Lưu cấu hình"}</button></div>{settingsError ? <p className="settings-error"><WarningCircle size={16} /> {settingsError}</p> : null}{settingsMessage ? <p className="settings-success"><CheckCircle size={16} /> {settingsMessage}</p> : null}</form>}</section>;
 }
 
 function TableSkeleton() {

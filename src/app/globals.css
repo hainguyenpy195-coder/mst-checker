@@ -250,6 +250,7 @@ button:not(:disabled):active { transform: translateY(1px); }
 .pagination-button:hover:not(:disabled) { color: var(--accent-dark); background: var(--accent-soft); border-color: var(--accent-border); }
 
 .settings-panel { max-width: 900px; margin-top: 28px; padding: 27px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+.settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .settings-heading h2 { margin: 0; color: var(--ink); font-size: 21px; font-weight: 720; letter-spacing: -0.03em; }
 .settings-loading { margin-top: 25px; color: var(--muted); font-size: 13px; }
 .settings-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 22px; }
@@ -313,6 +314,7 @@ button:not(:disabled):active { transform: translateY(1px); }
   .table-footer { display: flex; align-items: center; flex-direction: column; padding: 14px 16px; }
   .pagination-controls { justify-self: auto; }
   .settings-panel { padding: 22px 18px; }
+  .settings-heading { align-items: flex-start; flex-direction: column; }
   .activity-toolbar { padding: 19px 16px; }
   .page-notice { top: 76px; right: 16px; }
   .confirm-dialog { padding: 23px 20px; }
