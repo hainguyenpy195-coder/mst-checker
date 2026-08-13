@@ -1,7 +1,4 @@
--- Supabase Cron cleanup for the MST refresh worker.
---
--- Automatic monthly dispatch and minute-level drain are intentionally disabled.
--- Refreshes are started manually from the application UI.
+-- Disable scheduled refreshes. The application now starts refreshes manually.
 
 create extension if not exists pg_cron;
 
@@ -10,6 +7,7 @@ begin
   if exists (select 1 from cron.job where jobname = 'mst-checker-monthly-dispatch') then
     perform cron.unschedule('mst-checker-monthly-dispatch');
   end if;
+
   if exists (select 1 from cron.job where jobname = 'mst-checker-worker-drain') then
     perform cron.unschedule('mst-checker-worker-drain');
   end if;

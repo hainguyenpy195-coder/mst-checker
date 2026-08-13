@@ -23,12 +23,15 @@ Mở `http://localhost:3000`.
 ## Supabase
 
 1. Tạo project Supabase.
-2. Chạy lần lượt năm migration trong SQL Editor:
+2. Chạy lần lượt các migration trong SQL Editor:
   - `supabase/migrations/202608130001_initial_schema.sql`
   - `supabase/migrations/202608130002_app_login_and_yearly_sources.sql`
   - `supabase/migrations/202608130003_recurring_refresh_schedule.sql`
   - `supabase/migrations/202608130004_targeted_and_monthly_refresh.sql`
   - `supabase/migrations/202608130005_prioritize_refresh_retries.sql`
+  - `supabase/migrations/202608130006_endpoint_settings.sql`
+  - `supabase/migrations/202608130007_taxpayer_activity_logs.sql`
+  - `supabase/migrations/202608130008_manual_refresh_only.sql`
 3. Tạo seed cục bộ từ workbook:
 
    ```powershell
@@ -39,7 +42,7 @@ Mở `http://localhost:3000`.
 5. Thiết lập secret nội bộ cho Edge Function bằng Supabase CLI hoặc Dashboard:
    `REFRESH_WORKER_SECRET`. Endpoint tra cứu MST công khai của XInvoice không
    yêu cầu `client-id` hoặc `api-key`.
-6. Triển khai Edge Function `supabase/functions/xinvoice-refresh` và cấu hình cron theo `supabase/cron.sql`. Lần đầu, các MST đã có trong `refresh_queue` được drain tối đa 10 MST mỗi phút. Về sau, chỉ ngày 1 hàng tháng lúc 12:00 (giờ Việt Nam) mới enqueue toàn bộ MST; worker drain xử lý hàng đợi theo giới hạn tốc độ của API. Nút cập nhật bên cạnh từng MST dùng targeted refresh cho đúng một mã.
+6. Triển khai Edge Function `supabase/functions/xinvoice-refresh`. Migration `202608130008_manual_refresh_only.sql` và `supabase/cron.sql` tắt các cron tự động; người dùng bắt đầu cập nhật bằng nút `Cập nhật toàn bộ` ở tab Tổng hợp hoặc nút cập nhật từng MST. Worker vẫn xử lý theo lô tối đa 10 MST/lượt và retry/backoff để tôn trọng giới hạn endpoint.
 
 Supabase Auth không được sử dụng trong phiên bản nội bộ này. Vercel kiểm tra
 tài khoản ứng dụng trong các biến `APP_LOGIN_*` rồi cấp cookie phiên httpOnly.

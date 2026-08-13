@@ -2,12 +2,13 @@
 
 ## Migration
 
-Run all five migration files in the Supabase SQL Editor, in order. The second
+Run all migration files in the Supabase SQL Editor, in order. The second
 migration adds the previous-check timestamp, yearly source index and the
 service-role refresh request function used by the Vercel API. The third keeps
 the older due-date helper for compatibility. The fourth adds targeted claims
 and the monthly dispatcher. The fifth ensures retry jobs are not starved by
-the initial backfill queue.
+the initial backfill queue. The eighth disables the old scheduled refresh
+jobs; refreshes are now started manually from the application.
 
 ## Initial data
 
@@ -46,14 +47,12 @@ uses the dedicated `x-refresh-secret` header:
 supabase functions deploy xinvoice-refresh --no-verify-jwt
 ```
 
-Then adapt `cron.sql` to the project URL and run it. The monthly dispatcher
-enqueues all taxpayers at 12:00 Vietnam time on the first day of each month;
-the minute-level drain only claims work while the queue is non-empty. This
-drain also completes the first backfill already placed in the queue by the
-seed. A manual refresh or a newly added MST sends a targeted `taxCode` request
-and the worker claims only that one code. The worker claims at most ten batch
-rows per invocation and uses retry/backoff. It must not be configured to
-bypass XInvoice limits or use rotating proxies.
+Run migration `202608130008_manual_refresh_only.sql` (or `cron.sql`) to remove
+the old scheduled jobs. Refreshes are started manually from the application:
+the overview button queues the full catalogue and drains it in batches, while
+the row button sends a targeted `taxCode` request. The worker claims at most
+ten batch rows per invocation and uses retry/backoff. It must not be configured
+to bypass XInvoice limits or use rotating proxies.
 
 Hosted Edge Functions provide `SUPABASE_SECRET_KEYS` as a JSON dictionary and
 the worker reads its `default` entry. It also accepts the singular

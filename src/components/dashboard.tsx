@@ -26,6 +26,7 @@ import { isValidTaxCode, normalizeTaxCode, TAX_CODE_FORMAT_HINT, TAX_CODE_INPUT_
 const DEFAULT_YEARS = ["2023", "2024", "2025", "2026"];
 const DEFAULT_YEAR = "2025";
 const PAGE_SIZE = 100;
+const MANUAL_REFRESH_INTERVAL_MS = 60_000;
 type ViewMode = DashboardView;
 
 type TaxpayerDetail = {
@@ -132,6 +133,8 @@ export default function Dashboard({ username }: DashboardProps) {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isRefreshingAll, setIsRefreshingAll] = useState(false);
+  const [refreshAllProgress, setRefreshAllProgress] = useState<{ processed: number; pending: number } | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [updatingTaxCode, setUpdatingTaxCode] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -151,6 +154,8 @@ export default function Dashboard({ username }: DashboardProps) {
   const [currentPage, setCurrentPage] = useState(1);
   const taxCodeLookupSequence = useRef(0);
   const taxCodeLookupRequest = useRef<{ taxCode: string; promise: Promise<TaxCodeLookupResult> } | null>(null);
+  const overviewSummaryLoaded = useRef(false);
+  const refreshAllLock = useRef(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const activeYear = viewMode === "sheets" ? selectedYear : viewMode === "overview" ? "all" : null;
@@ -241,11 +246,12 @@ export default function Dashboard({ username }: DashboardProps) {
   }, [activeYear, viewMode]);
 
   useEffect(() => {
-    if (viewMode === "overview") return;
+    if (overviewSummaryLoaded.current || viewMode === "overview") return;
+    overviewSummaryLoaded.current = true;
     void loadOverviewSummary();
-    // The overview KPI source is intentionally independent of the active tab.
+    // The overview KPI source is loaded once when the initial tab is not overview.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode]);
+  }, []);
 
   useEffect(() => {
     if (!notice) return;
@@ -334,6 +340,62 @@ export default function Dashboard({ username }: DashboardProps) {
       setError(exportError instanceof Error ? exportError.message : "Không thể xuất Excel.");
     } finally {
       setIsExporting(false);
+    }
+  }
+
+  function waitForManualRefresh() {
+    return new Promise<void>((resolve) => window.setTimeout(resolve, MANUAL_REFRESH_INTERVAL_MS));
+  }
+
+  async function refreshAllTaxpayers() {
+    if (refreshAllLock.current) return;
+
+    refreshAllLock.current = true;
+    setIsRefreshingAll(true);
+    setRefreshAllProgress({ processed: 0, pending: 0 });
+    setError(null);
+    setNotice(null);
+
+    let mode: "start" | "continue" = "start";
+    let processedTotal = 0;
+    try {
+      while (true) {
+        const response = await fetch("/api/taxpayers/refresh-all", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ mode }),
+          cache: "no-store",
+        });
+        const payload = await response.json() as {
+          error?: string;
+          done?: boolean;
+          processed?: number;
+          pending?: number;
+          queue?: { dead_letter?: number };
+        };
+        if (!response.ok && response.status !== 202) throw new Error(payload.error ?? "Không thể bắt đầu cập nhật toàn bộ.");
+
+        processedTotal += payload.processed ?? 0;
+        const pending = payload.pending ?? 0;
+        setRefreshAllProgress({ processed: processedTotal, pending });
+        if (payload.done || pending === 0) {
+          await loadData();
+          await loadOverviewSummary();
+          const deadLetterCount = payload.queue?.dead_letter ?? 0;
+          setNotice(deadLetterCount
+            ? `Đã xử lý xong hàng đợi. Còn ${deadLetterCount.toLocaleString("vi-VN")} MST lỗi cần kiểm tra lại.`
+            : `Đã cập nhật toàn bộ ${processedTotal.toLocaleString("vi-VN")} lượt MST.`);
+          break;
+        }
+
+        mode = "continue";
+        await waitForManualRefresh();
+      }
+    } catch (refreshAllError) {
+      setError(refreshAllError instanceof Error ? refreshAllError.message : "Không thể cập nhật toàn bộ.");
+    } finally {
+      refreshAllLock.current = false;
+      setIsRefreshingAll(false);
     }
   }
 
@@ -605,8 +667,9 @@ export default function Dashboard({ username }: DashboardProps) {
               <h1>{viewMode === "overview" ? "Bảng tổng hợp" : viewMode === "sheets" ? `Danh sách MST năm ${selectedYear}` : viewMode === "activity" ? "Lịch sử thao tác" : "Cấu hình"}</h1>
             </div>
             {viewMode === "overview" || viewMode === "sheets" ? <div className="heading-actions">
-              <button className="outline-button" type="button" onClick={toggleAddForm}><Plus size={17} /> Thêm MST</button>
-              <button className="export-button" type="button" onClick={() => void exportWorkbook()} disabled={isExporting}><DownloadSimple size={17} /> {isExporting ? "Đang xuất" : "Xuất Excel"}</button>
+              {viewMode === "overview" ? <button className="outline-button" type="button" onClick={() => void refreshAllTaxpayers()} disabled={isRefreshingAll}><ArrowsClockwise size={17} className={isRefreshingAll ? "update-icon-spinning" : ""} /> {isRefreshingAll ? `Đang cập nhật${refreshAllProgress ? ` (${refreshAllProgress.processed} / còn ${refreshAllProgress.pending})` : "..."}` : "Cập nhật toàn bộ"}</button> : null}
+              <button className="outline-button" type="button" onClick={toggleAddForm} disabled={isRefreshingAll}><Plus size={17} /> Thêm MST</button>
+              <button className="export-button" type="button" onClick={() => void exportWorkbook()} disabled={isExporting || isRefreshingAll}><DownloadSimple size={17} /> {isExporting ? "Đang xuất" : "Xuất Excel"}</button>
             </div> : null}
           </div>
 
@@ -646,7 +709,7 @@ export default function Dashboard({ username }: DashboardProps) {
                     return <Fragment key={row.id}>
                       <tr key={row.id} className={`data-row ${isExpanded ? "data-row-expanded" : ""}`} onClick={() => setExpandedRow(isExpanded ? null : row.id)}>
                         <td className="col-expand"><CaretRight size={16} className={isExpanded ? "caret-open" : ""} /></td>
-                        <td className="tax-code-cell"><div className="tax-code-with-action"><span>{row.tax_code}</span><button className="row-update-button" type="button" title={`Cập nhật ${row.tax_code}`} aria-label={`Cập nhật ${row.tax_code}`} disabled={Boolean(updatingTaxCode)} onClick={(event) => { event.stopPropagation(); void refreshTaxpayer(row.tax_code); }}><ArrowsClockwise size={13} className={updatingTaxCode === row.tax_code ? "update-icon-spinning" : ""} /></button><button className="row-delete-button" type="button" title={`Xóa toàn bộ MST ${row.tax_code}`} aria-label={`Xóa toàn bộ MST ${row.tax_code}`} disabled={isDeleting} onClick={(event) => { event.stopPropagation(); openDeleteDialog(row); }}><Trash size={13} /></button></div></td>
+                        <td className="tax-code-cell"><div className="tax-code-with-action"><span>{row.tax_code}</span><button className="row-update-button" type="button" title={`Cập nhật ${row.tax_code}`} aria-label={`Cập nhật ${row.tax_code}`} disabled={Boolean(updatingTaxCode) || isRefreshingAll} onClick={(event) => { event.stopPropagation(); void refreshTaxpayer(row.tax_code); }}><ArrowsClockwise size={13} className={updatingTaxCode === row.tax_code ? "update-icon-spinning" : ""} /></button><button className="row-delete-button" type="button" title={`Xóa toàn bộ MST ${row.tax_code}`} aria-label={`Xóa toàn bộ MST ${row.tax_code}`} disabled={isDeleting || isRefreshingAll} onClick={(event) => { event.stopPropagation(); openDeleteDialog(row); }}><Trash size={13} /></button></div></td>
                         <td><strong>{detail?.name ?? row.source_vendor_name ?? "Chưa có tên"}</strong><small>{detail?.address ?? ""}</small></td>
                         <td><span className="sheet-label">{row.source_sheet}</span></td>
                         <td><span className={statusClass(detail)}>{statusLabel(detail)}</span></td>

@@ -4,6 +4,11 @@ type WorkerResult = {
   error?: string;
 };
 
+type WorkerRequest = {
+  taxCode?: string;
+  preview?: boolean;
+};
+
 export type TaxpayerPreview = {
   tax_code: string;
   name: string | null;
@@ -34,7 +39,7 @@ function getWorkerConfig() {
   return { url: `${baseUrl}/functions/v1/xinvoice-refresh`, workerSecret };
 }
 
-async function invokeWorker(body: { taxCode: string; preview?: boolean }): Promise<WorkerResponse> {
+async function invokeWorker(body: WorkerRequest): Promise<WorkerResponse> {
   const { url, workerSecret } = getWorkerConfig();
   const response = await fetch(url, {
     method: "POST",
@@ -57,6 +62,10 @@ async function invokeWorker(body: { taxCode: string; preview?: boolean }): Promi
 
 export function invokeTaxpayerRefresh(taxCode: string) {
   return invokeWorker({ taxCode });
+}
+
+export function invokeTaxpayerBatchRefresh() {
+  return invokeWorker({});
 }
 
 export function invokeTaxpayerPreview(taxCode: string) {
