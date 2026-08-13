@@ -69,6 +69,7 @@ type ManualLookupState = {
   error: string | null;
   captchaFailureCount: number;
   requiresCaptchaRefresh: boolean;
+  captchaLimitReached: boolean;
   isSubmitting: boolean;
 };
 type ActivityRow = {
@@ -437,6 +438,7 @@ export default function Dashboard({ username }: DashboardProps) {
   async function startManualLookup(taxCode: string, replaceExisting = false) {
     if (isStartingManualLookup || (!replaceExisting && manualLookup)) return;
 
+    const continuingAfterCaptchaLimit = replaceExisting && Boolean(manualLookup?.requiresCaptchaRefresh);
     setIsStartingManualLookup(true);
     setUpdatingTaxCode(taxCode);
     setError(null);
@@ -465,6 +467,7 @@ export default function Dashboard({ username }: DashboardProps) {
         error: null,
         captchaFailureCount: 0,
         requiresCaptchaRefresh: false,
+        captchaLimitReached: continuingAfterCaptchaLimit,
         isSubmitting: false,
       });
     } catch (lookupError) {
@@ -507,6 +510,12 @@ export default function Dashboard({ username }: DashboardProps) {
       };
 
       if (response.status === 422 && (payload.captchaInvalid || payload.retryRequired)) {
+        if (payload.captchaInvalid && currentLookup.captchaLimitReached) {
+          setManualLookup(null);
+          setError("Cục Thuế đang bận, vui lòng thử lại sau ít phút.");
+          return;
+        }
+
         setManualLookup((current) => {
           if (!current) return current;
           const captchaFailureCount = current.captchaFailureCount
@@ -523,6 +532,7 @@ export default function Dashboard({ username }: DashboardProps) {
               : payload.error ?? "Cục Thuế trả về dữ liệu chưa hoàn chỉnh. Vui lòng thử lại.",
             captchaFailureCount,
             requiresCaptchaRefresh,
+            captchaLimitReached: current.captchaLimitReached,
             isSubmitting: false,
           };
         });
