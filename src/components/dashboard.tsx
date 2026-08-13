@@ -202,6 +202,7 @@ export default function Dashboard({ username }: DashboardProps) {
 
   const activeYear = viewMode === "sheets" ? selectedYear : viewMode === "overview" ? "all" : null;
   const latestYear = getLatestYear(years);
+  const isDataView = viewMode === "overview" || viewMode === "sheets";
 
   useEffect(() => {
     if (viewMode !== "sheets") return;
@@ -341,9 +342,9 @@ export default function Dashboard({ username }: DashboardProps) {
     navigateToView("overview");
   }
 
-  function clearSearch() {
+  function clearSearch(restoreFocus = true) {
     setQuery("");
-    requestAnimationFrame(() => searchInputRef.current?.focus());
+    if (restoreFocus) requestAnimationFrame(() => searchInputRef.current?.focus());
   }
 
   async function exportWorkbook() {
@@ -790,7 +791,7 @@ export default function Dashboard({ username }: DashboardProps) {
         </header>
 
         <main className="dashboard-content">
-          <div className="page-heading-row">
+          <div className={`page-heading-row ${isDataView ? "desktop-page-heading" : ""}`}>
             <div>
               <h1>{viewMode === "overview" ? "Bảng tổng hợp" : viewMode === "sheets" ? `Danh sách MST năm ${selectedYear}` : viewMode === "activity" ? "Lịch sử thao tác" : "Cấu hình"}</h1>
             </div>
@@ -808,12 +809,40 @@ export default function Dashboard({ username }: DashboardProps) {
 
           {viewMode === "activity" ? <ActivityPanel rows={activityRows} isLoading={isActivityLoading} error={activityError} /> : null}
 
-          {viewMode === "overview" || viewMode === "sheets" ? <>
-          <section className="table-section">
+          {isDataView ? <>
+          <MobileLookupPanel
+            viewMode={viewMode}
+            years={years}
+            selectedYear={selectedYear}
+            displayRows={displayRows}
+            filteredRows={filteredRows}
+            query={query}
+            statusFilter={statusFilter}
+            isLoading={isLoading}
+            isExporting={isExporting}
+            isRefreshingAll={isRefreshingAll}
+            isStartingManualLookup={isStartingManualLookup}
+            isManualLookupOpen={Boolean(manualLookup)}
+            isDeleting={isDeleting}
+            updatingTaxCode={updatingTaxCode}
+            expandedRow={expandedRow}
+            error={error}
+            onQueryChange={(value) => setQuery(value)}
+            onSearch={search}
+            onClearSearch={() => clearSearch(false)}
+            onStatusFilterChange={(value) => setStatusFilter(value)}
+            onSelectYear={selectYear}
+            onToggleAdd={toggleAddForm}
+            onExport={() => void exportWorkbook()}
+            onToggleRow={(rowId) => setExpandedRow((current) => current === rowId ? null : rowId)}
+            onRefresh={(row) => void refreshTaxpayer(row)}
+            onDelete={openDeleteDialog}
+          />
+          <section className="table-section desktop-data-table">
             <div className="table-toolbar">
               <div><h2>{viewMode === "overview" ? "Bản ghi tổng hợp" : `MST trong năm ${selectedYear}`}</h2><span>{filteredRows.length ? `Hiển thị ${pageStart}-${pageEnd} / ${filteredRows.length} dòng` : "0 dòng đang hiển thị"}</span></div>
               <div className="toolbar-tools">
-                <form className="table-search" onSubmit={search}><MagnifyingGlass size={16} /><input ref={searchInputRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm MST hoặc tên..." aria-label="Tìm kiếm MST hoặc tên" /><button type="button" title="Xóa nội dung tìm kiếm" aria-label="Xóa nội dung tìm kiếm" disabled={!query} onClick={clearSearch}><X size={15} /></button></form>
+                <form className="table-search" onSubmit={search}><MagnifyingGlass size={16} /><input ref={searchInputRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm MST hoặc tên..." aria-label="Tìm kiếm MST hoặc tên" /><button type="button" title="Xóa nội dung tìm kiếm" aria-label="Xóa nội dung tìm kiếm" disabled={!query} onClick={() => clearSearch()}><X size={15} /></button></form>
                 <select className="filter-select" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Lọc theo tình trạng"><option value="all">Tất cả</option><option value="active">Đang hoạt động</option><option value="inactive">Không hoạt động</option><option value="unknown">Chưa có dữ liệu</option><option value="error">Có lỗi</option></select>
               </div>
             </div>
@@ -854,6 +883,29 @@ export default function Dashboard({ username }: DashboardProps) {
           </section>
           </> : null}
         </main>
+        <nav className="mobile-bottom-nav" aria-label="Điều hướng di động">
+          {navItems.map(({ label, icon: Icon, mode }) => (
+            <button
+              className={viewMode === mode ? "mobile-nav-link mobile-nav-link-active" : "mobile-nav-link"}
+              key={label}
+              type="button"
+              aria-current={viewMode === mode ? "page" : undefined}
+              onClick={() => navigateToView(mode)}
+            >
+              <Icon size={19} weight="regular" />
+              <span>{label}</span>
+            </button>
+          ))}
+          <button
+            className={viewMode === "settings" ? "mobile-nav-link mobile-nav-link-active" : "mobile-nav-link"}
+            type="button"
+            aria-current={viewMode === "settings" ? "page" : undefined}
+            onClick={() => navigateToView("settings")}
+          >
+            <Gear size={19} weight="regular" />
+            <span>Cấu hình</span>
+          </button>
+        </nav>
       </div>
       {manualLookup ? <div className="confirm-backdrop">
         <section className="confirm-dialog manual-lookup-dialog" role="dialog" aria-modal="true" aria-labelledby="manual-lookup-dialog-title" aria-describedby="manual-lookup-dialog-description">
@@ -879,6 +931,218 @@ export default function Dashboard({ username }: DashboardProps) {
   );
 }
 
+type MobileLookupPanelProps = {
+  viewMode: ViewMode;
+  years: string[];
+  selectedYear: string;
+  displayRows: TaxpayerRow[];
+  filteredRows: TaxpayerRow[];
+  query: string;
+  statusFilter: string;
+  isLoading: boolean;
+  isExporting: boolean;
+  isRefreshingAll: boolean;
+  isStartingManualLookup: boolean;
+  isManualLookupOpen: boolean;
+  isDeleting: boolean;
+  updatingTaxCode: string | null;
+  expandedRow: number | null;
+  error: string | null;
+  onQueryChange: (value: string) => void;
+  onSearch: (event: FormEvent<HTMLFormElement>) => void;
+  onClearSearch: () => void;
+  onStatusFilterChange: (value: string) => void;
+  onSelectYear: (year: string) => void;
+  onToggleAdd: () => void;
+  onExport: () => void;
+  onToggleRow: (rowId: number) => void;
+  onRefresh: (row: TaxpayerRow) => void;
+  onDelete: (row: TaxpayerRow) => void;
+};
+
+function MobileLookupPanel({
+  viewMode,
+  years,
+  selectedYear,
+  displayRows,
+  filteredRows,
+  query,
+  statusFilter,
+  isLoading,
+  isExporting,
+  isRefreshingAll,
+  isStartingManualLookup,
+  isManualLookupOpen,
+  isDeleting,
+  updatingTaxCode,
+  expandedRow,
+  error,
+  onQueryChange,
+  onSearch,
+  onClearSearch,
+  onStatusFilterChange,
+  onSelectYear,
+  onToggleAdd,
+  onExport,
+  onToggleRow,
+  onRefresh,
+  onDelete,
+}: MobileLookupPanelProps) {
+  const activeCount = displayRows.filter((row) => row.taxpayer?.status_group === "active").length;
+  const attentionCount = displayRows.filter((row) => Boolean(row.taxpayer?.last_error)
+    || isSourceDataStale(row.taxpayer?.source_updated_at ?? null)).length;
+  const hasTextQuery = Boolean(query.trim());
+  const hasLookupCriteria = hasTextQuery || statusFilter !== "all";
+  const mobileResults = filteredRows.slice(0, 20);
+  const resultTitle = hasTextQuery ? "Kết quả tra cứu" : "Kết quả lọc";
+  const totalLabel = viewMode === "sheets" ? `MST năm ${selectedYear}` : "MST đang theo dõi";
+
+  return <section className="mobile-dashboard" aria-label="Tra cứu nhanh trên di động">
+    <div className="mobile-bento-grid">
+      <form className="mobile-lookup-card" onSubmit={onSearch}>
+        <div>
+          <span className="mobile-section-eyebrow">TRA CỨU NHANH</span>
+          <h2>Tìm nhà cung ứng</h2>
+          <p>Tra cứu theo mã số thuế hoặc tên nhà cung ứng.</p>
+        </div>
+        <div className="mobile-search-box">
+          <MagnifyingGlass size={19} aria-hidden="true" />
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+            placeholder="Mã số thuế hoặc tên nhà cung ứng"
+            aria-label="Tra cứu theo mã số thuế hoặc tên nhà cung ứng"
+            aria-describedby="mobile-quick-lookup-hint"
+            enterKeyHint="search"
+          />
+          <button type="button" className="mobile-search-clear" aria-label="Xóa nội dung tra cứu" disabled={!query} onClick={onClearSearch}><X size={17} /></button>
+        </div>
+        <div className="mobile-lookup-footer">
+          <span id="mobile-quick-lookup-hint">Kết quả được lọc ngay khi bạn nhập.</span>
+          <button className="mobile-search-submit" type="submit">Tra cứu</button>
+        </div>
+      </form>
+
+      <div className="mobile-bento-summary mobile-bento-summary-primary">
+        <span>{totalLabel}</span>
+        <strong>{displayRows.length.toLocaleString("vi-VN")}</strong>
+        <small>{viewMode === "sheets" ? `Danh sách nguồn năm ${selectedYear}` : "Danh mục tổng hợp hiện tại"}</small>
+      </div>
+      <div className="mobile-bento-summary mobile-bento-summary-success">
+        <span>Đang hoạt động</span>
+        <strong>{activeCount.toLocaleString("vi-VN")}</strong>
+        <small>Đã xác nhận trạng thái</small>
+      </div>
+      <div className="mobile-bento-summary mobile-bento-summary-warning">
+        <span>Cần xem lại</span>
+        <strong>{attentionCount.toLocaleString("vi-VN")}</strong>
+        <small>Lỗi hoặc nguồn dữ liệu cũ</small>
+      </div>
+
+      <label className={`mobile-bento-control ${viewMode === "overview" ? "mobile-bento-control-wide" : ""}`}>
+        <span>Tình trạng</span>
+        <select value={statusFilter} onChange={(event) => onStatusFilterChange(event.target.value)} aria-label="Lọc theo tình trạng">
+          <option value="all">Tất cả</option>
+          <option value="active">Đang hoạt động</option>
+          <option value="inactive">Không hoạt động</option>
+          <option value="unknown">Chưa có dữ liệu</option>
+          <option value="error">Có lỗi</option>
+        </select>
+      </label>
+      {viewMode === "sheets" ? <label className="mobile-bento-control">
+        <span>Năm theo dõi</span>
+        <select value={selectedYear} onChange={(event) => onSelectYear(event.target.value)} aria-label="Chọn năm theo dõi">
+          {years.map((year) => <option key={year} value={year}>{year}</option>)}
+        </select>
+      </label> : null}
+
+      <div className="mobile-quick-actions" aria-label="Thao tác danh mục">
+        <button className="outline-button" type="button" onClick={onToggleAdd} disabled={isRefreshingAll}><Plus size={17} /> Thêm MST</button>
+        <button className="export-button" type="button" onClick={onExport} disabled={isExporting || isRefreshingAll}><DownloadSimple size={17} /> {isExporting ? "Đang xuất" : "Xuất Excel"}</button>
+      </div>
+    </div>
+
+    {error ? <div className="mobile-inline-alert" role="alert"><WarningCircle size={18} /> {error}</div> : null}
+
+    <section className="mobile-lookup-results" aria-labelledby="mobile-lookup-results-title" aria-live="polite">
+      <div className="mobile-results-heading">
+        <div>
+          <span className="mobile-section-eyebrow">{viewMode === "sheets" ? `NĂM ${selectedYear}` : "DANH MỤC"}</span>
+          <h2 id="mobile-lookup-results-title">{resultTitle}</h2>
+        </div>
+        {hasLookupCriteria && !isLoading ? <span className="mobile-results-count">{filteredRows.length.toLocaleString("vi-VN")} kết quả</span> : null}
+      </div>
+
+      {isLoading ? <div className="mobile-results-skeleton" aria-label="Đang tải dữ liệu">
+        {[1, 2, 3].map((item) => <div key={item} />)}
+      </div> : !hasLookupCriteria ? <div className="mobile-empty-state">
+        <MagnifyingGlass size={25} weight="duotone" />
+        <strong>Nhập thông tin để bắt đầu</strong>
+        <span>Tìm theo MST hoặc tên nhà cung ứng để xem kết quả gọn trên điện thoại.</span>
+      </div> : filteredRows.length === 0 ? <div className="mobile-empty-state">
+        <FileText size={25} weight="duotone" />
+        <strong>Chưa tìm thấy bản ghi phù hợp</strong>
+        <span>Thử lại bằng MST, tên nhà cung ứng hoặc thay đổi bộ lọc tình trạng.</span>
+      </div> : <div className="mobile-result-list">
+        {mobileResults.map((row) => <MobileTaxpayerCard
+          key={row.id}
+          row={row}
+          isExpanded={expandedRow === row.id}
+          isUpdating={updatingTaxCode === row.tax_code}
+          disableRefresh={Boolean(updatingTaxCode) || isStartingManualLookup || isManualLookupOpen || isRefreshingAll}
+          disableDelete={isDeleting || isRefreshingAll || isManualLookupOpen}
+          onToggle={() => onToggleRow(row.id)}
+          onRefresh={() => onRefresh(row)}
+          onDelete={() => onDelete(row)}
+        />)}
+        {filteredRows.length > mobileResults.length ? <p className="mobile-results-limit">Hiển thị 20 kết quả đầu tiên. Hãy nhập thêm ký tự để thu hẹp kết quả.</p> : null}
+      </div>}
+    </section>
+  </section>;
+}
+
+type MobileTaxpayerCardProps = {
+  row: TaxpayerRow;
+  isExpanded: boolean;
+  isUpdating: boolean;
+  disableRefresh: boolean;
+  disableDelete: boolean;
+  onToggle: () => void;
+  onRefresh: () => void;
+  onDelete: () => void;
+};
+
+function MobileTaxpayerCard({ row, isExpanded, isUpdating, disableRefresh, disableDelete, onToggle, onRefresh, onDelete }: MobileTaxpayerCardProps) {
+  const detail = row.taxpayer;
+  const sourceIsStale = isSourceDataStale(detail?.source_updated_at ?? null);
+  const name = detail?.name ?? row.source_vendor_name ?? "Chưa có tên";
+  const refreshTitle = `Tra cứu thủ công tại Cục Thuế cho ${row.tax_code}`;
+
+  return <article className={isExpanded ? "mobile-result-card mobile-result-card-expanded" : "mobile-result-card"}>
+    <button className="mobile-result-summary" type="button" onClick={onToggle} aria-expanded={isExpanded}>
+      <span className="mobile-result-topline"><span className="mobile-tax-code">{row.tax_code}</span><CaretRight size={18} className={isExpanded ? "caret-open" : ""} /></span>
+      <strong>{name}</strong>
+      <span className="mobile-result-status"><span className={statusClass(detail)}>{statusLabel(detail)}</span>{sourceIsStale ? <em>Dữ liệu nguồn cũ</em> : null}</span>
+      <span className="mobile-result-meta">Năm nguồn: {row.source_sheet} · Tra cứu: {formatDate(detail?.last_checked_at ?? null)}</span>
+    </button>
+    {isExpanded ? <div className="mobile-result-detail">
+      <dl className="mobile-detail-list">
+        <div><dt>Mã số thuế</dt><dd className="mono-value">{row.tax_code}</dd></div>
+        <div><dt>Năm nguồn</dt><dd>{row.source_sheet}</dd></div>
+        <div className="mobile-detail-item-wide"><dt>Địa chỉ</dt><dd>{detail?.address ?? "Chưa có"}</dd></div>
+        <div><dt>Tra cứu lúc</dt><dd>{formatDate(detail?.last_checked_at ?? null)}</dd></div>
+        <div><dt>Nguồn dữ liệu</dt><dd>{formatSourceDate(detail?.source_updated_at ?? null)}</dd></div>
+      </dl>
+      {detail?.last_error ? <div className="mobile-detail-error"><WarningCircle size={16} /> {detail.last_error}</div> : null}
+      <div className="mobile-result-actions">
+        <button className="outline-button" type="button" title={refreshTitle} disabled={disableRefresh} onClick={onRefresh}><ArrowsClockwise size={16} className={isUpdating ? "update-icon-spinning" : ""} /> {isUpdating ? "Đang mở CAPTCHA" : "Đối chiếu Cục Thuế"}</button>
+        <button className="mobile-delete-action" type="button" disabled={disableDelete} onClick={onDelete}><Trash size={16} /> Xóa</button>
+      </div>
+    </div> : null}
+  </article>;
+}
+
 function ActivityPanel({ rows, isLoading, error }: { rows: ActivityRow[]; isLoading: boolean; error: string | null }) {
   return <section className="activity-section">
     <div className="activity-toolbar"><div><h2>Nhật ký danh mục</h2><span>100 thao tác thêm hoặc xóa MST gần nhất.</span></div></div>
@@ -891,6 +1155,13 @@ function ActivityPanel({ rows, isLoading, error }: { rows: ActivityRow[]; isLoad
         </tbody>
       </table>
     </div>
+    <div className="mobile-activity-list" aria-live="polite">
+      {isLoading ? <>{[1, 2, 3].map((item) => <div className="mobile-activity-skeleton" key={item}><span /><span /><span /></div>)}</> : rows.length === 0 ? <div className="mobile-empty-state"><ClockCounterClockwise size={25} weight="duotone" /><strong>Chưa có thao tác nào được ghi nhận</strong><span>Các lần thêm hoặc xóa MST sẽ xuất hiện tại đây.</span></div> : rows.map((row) => <article className="mobile-activity-card" key={row.id}>
+        <div className="mobile-activity-card-topline"><span className={`activity-action activity-action-${row.action === "taxpayer_added" ? "added" : "deleted"}`}>{activityLabel(row.action)}</span><time>{formatDate(row.created_at)}</time></div>
+        <strong className="mobile-tax-code">{row.tax_code}</strong>
+        <span>{row.taxpayer_name ?? "Chưa có tên"}</span>
+        <small>Năm {row.source_year ?? "chưa rõ"} · {row.actor_username}</small>
+      </article>)}</div>
   </section>;
 }
 
