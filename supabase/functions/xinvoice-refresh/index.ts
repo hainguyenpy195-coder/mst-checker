@@ -122,6 +122,11 @@ function normalizedDate(value: string | null | undefined) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
+function isIncomingSourceOlder(currentSourceUpdatedAt: string | null, incomingSourceUpdatedAt: string | null) {
+  if (!currentSourceUpdatedAt || !incomingSourceUpdatedAt) return false;
+  return new Date(incomingSourceUpdatedAt).getTime() < new Date(currentSourceUpdatedAt).getTime();
+}
+
 function preferVietQrValue(currentValue: string | null, incomingValue: string | undefined, currentUpdatedAt: string | null, incomingUpdatedAt: string | null) {
   if (!incomingValue) return currentValue;
   if (!currentValue) return incomingValue;
@@ -265,6 +270,15 @@ async function fetchWithFallback(taxCode: string, endpoints: EndpointSettings): 
   }
 }
 
+async function markJobSuccess(taxCode: string) {
+  const { error } = await supabase
+    .from("refresh_queue")
+    .update({ state: "success", attempts: 0, locked_at: null, last_error: null })
+    .eq("tax_code", taxCode);
+
+  if (error) throw error;
+}
+
 async function handleJob(job: RefreshJob, endpoints: EndpointSettings) {
   const { data: current, error: currentError } = await supabase
     .from("taxpayers")
@@ -275,7 +289,31 @@ async function handleJob(job: RefreshJob, endpoints: EndpointSettings) {
   if (currentError) throw currentError;
 
   const { payload, provider } = await fetchWithFallback(job.tax_code, endpoints);
+  const now = new Date().toISOString();
   const incomingSourceUpdatedAt = normalizedDate(payload.updatedAt);
+  const timestampUpdate = {
+    previous_checked_at: current.last_checked_at ?? null,
+    last_checked_at: now,
+  };
+
+  if (isIncomingSourceOlder(normalizedDate(current.source_updated_at), incomingSourceUpdatedAt)) {
+    // The lookup succeeded, but the provider returned an older snapshot. Keep
+    // the current taxpayer data and only record that the lookup was performed.
+    const { error: timestampError } = await supabase
+      .from("taxpayers")
+      .update({
+        ...timestampUpdate,
+        last_error: null,
+        consecutive_failures: 0,
+        next_check_at: nextMonthlyRefreshAt(new Date(now)),
+      })
+      .eq("tax_code", job.tax_code);
+
+    if (timestampError) throw timestampError;
+    await markJobSuccess(job.tax_code);
+    return { skipped: true };
+  }
+
   const nextName = provider === "vietqr"
     ? preferVietQrValue(current.name, payload.name, current.source_updated_at, incomingSourceUpdatedAt)
     : payload.name ?? null;
@@ -302,8 +340,6 @@ async function handleJob(job: RefreshJob, endpoints: EndpointSettings) {
     || current.status !== newStatus
     || current.status_group !== newGroup
     || normalizedDate(current.source_updated_at) !== nextSourceUpdatedAt;
-  const now = new Date().toISOString();
-
   if (changed) {
     const { error: historyError } = await supabase.from("taxpayer_status_history").insert({
       tax_code: job.tax_code,
@@ -318,10 +354,6 @@ async function handleJob(job: RefreshJob, endpoints: EndpointSettings) {
     if (historyError) throw historyError;
   }
 
-  const timestampUpdate = {
-    previous_checked_at: current.last_checked_at ?? null,
-    last_checked_at: now,
-  };
   const taxpayerUpdate = payloadChanged
     ? {
         ...timestampUpdate,
@@ -349,12 +381,8 @@ async function handleJob(job: RefreshJob, endpoints: EndpointSettings) {
 
   if (updateError) throw updateError;
 
-  const { error: queueError } = await supabase
-    .from("refresh_queue")
-    .update({ state: "success", attempts: 0, locked_at: null, last_error: null })
-    .eq("tax_code", job.tax_code);
-
-  if (queueError) throw queueError;
+  await markJobSuccess(job.tax_code);
+  return { skipped: false };
 }
 
 function retryDelay(attempts: number) {
@@ -425,13 +453,17 @@ Deno.serve(async (request) => {
     return new Response(JSON.stringify({ error: claimError.message }), { status: 500, headers: { "content-type": "application/json" } });
   }
 
-  const results: Array<{ tax_code: string; ok: boolean; error?: string }> = [];
+  const results: Array<{ tax_code: string; ok: boolean; error?: string; skipped?: boolean; skipReason?: string }> = [];
   const endpointSettings = await loadEndpointSettings();
 
   for (const job of (jobs ?? []) as RefreshJob[]) {
     try {
-      await handleJob(job, endpointSettings);
-      results.push({ tax_code: job.tax_code, ok: true });
+      const result = await handleJob(job, endpointSettings);
+      results.push({
+        tax_code: job.tax_code,
+        ok: true,
+        ...(result.skipped ? { skipped: true, skipReason: "endpoint_older_than_db" } : {}),
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown worker error";
       const rateLimitMatch = message.match(/^RATE_LIMIT:(\d+)$/);

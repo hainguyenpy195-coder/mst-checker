@@ -61,7 +61,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: result.error ?? "Không thể cập nhật MST." }, { status: 502 });
     }
 
-    return NextResponse.json({ ok: true, taxCode, updated: true });
+    return NextResponse.json({ ok: true, taxCode, updated: !result.skipped, skipped: Boolean(result.skipped) });
   } catch (error) {
     console.error("manual taxpayer refresh failed", error);
     return NextResponse.json({

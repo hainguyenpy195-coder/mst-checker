@@ -2,6 +2,8 @@ type WorkerResult = {
   tax_code?: string;
   ok?: boolean;
   error?: string;
+  skipped?: boolean;
+  skipReason?: string;
 };
 
 type WorkerRequest = {

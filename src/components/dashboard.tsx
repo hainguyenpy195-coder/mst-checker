@@ -24,10 +24,14 @@ import { getDashboardHref, getDashboardViewFromPathname, type DashboardView } fr
 import { isValidTaxCode, normalizeTaxCode, TAX_CODE_FORMAT_HINT, TAX_CODE_INPUT_PATTERN } from "@/lib/tax-code";
 
 const DEFAULT_YEARS = ["2023", "2024", "2025", "2026"];
-const DEFAULT_YEAR = "2025";
+const DEFAULT_YEAR = DEFAULT_YEARS[DEFAULT_YEARS.length - 1] ?? "2026";
 const PAGE_SIZE = 100;
 const MANUAL_REFRESH_INTERVAL_MS = 60_000;
 type ViewMode = DashboardView;
+
+function getLatestYear(years: string[]) {
+  return years.reduce((latest, year) => Number(year) > Number(latest) ? year : latest, DEFAULT_YEAR);
+}
 
 type TaxpayerDetail = {
   tax_code: string;
@@ -55,8 +59,6 @@ type TaxpayerRow = {
   taxpayer: TaxpayerDetail | null;
 };
 
-type Summary = { total: number; active: number; inactive: number; errors: number };
-const EMPTY_SUMMARY: Summary = { total: 0, active: 0, inactive: 0, errors: 0 };
 type DeleteTarget = { taxCode: string; name: string | null };
 type ActivityRow = {
   id: number;
@@ -131,7 +133,6 @@ export default function Dashboard({ username }: DashboardProps) {
   const [years, setYears] = useState<string[]>(DEFAULT_YEARS);
   const [selectedYear, setSelectedYear] = useState(routeYear ?? DEFAULT_YEAR);
   const [rows, setRows] = useState<TaxpayerRow[]>([]);
-  const [overviewSummary, setOverviewSummary] = useState<Summary>(EMPTY_SUMMARY);
   const [activityRows, setActivityRows] = useState<ActivityRow[]>([]);
   const [isActivityLoading, setIsActivityLoading] = useState(false);
   const [activityError, setActivityError] = useState<string | null>(null);
@@ -160,27 +161,27 @@ export default function Dashboard({ username }: DashboardProps) {
   const [currentPage, setCurrentPage] = useState(1);
   const taxCodeLookupSequence = useRef(0);
   const taxCodeLookupRequest = useRef<{ taxCode: string; promise: Promise<TaxCodeLookupResult> } | null>(null);
-  const overviewSummaryLoaded = useRef(false);
   const refreshAllLock = useRef(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const activeYear = viewMode === "sheets" ? selectedYear : viewMode === "overview" ? "all" : null;
+  const latestYear = getLatestYear(years);
 
   useEffect(() => {
     if (viewMode !== "sheets") return;
 
-    const nextYear = routeYear ?? DEFAULT_YEAR;
+    const nextYear = routeYear ?? latestYear;
     setSelectedYear(nextYear);
     if (requestedYear !== nextYear) {
       router.replace(getDashboardHref("sheets", nextYear), { scroll: false });
     }
-  }, [requestedYear, routeYear, router, viewMode]);
+  }, [latestYear, requestedYear, routeYear, router, viewMode]);
 
-  function navigateToView(nextView: ViewMode, year = selectedYear) {
+  function navigateToView(nextView: ViewMode, year?: string) {
     setError(null);
     if (nextView === "activity" || nextView === "settings") closeAddForm();
 
-    const href = getDashboardHref(nextView, nextView === "sheets" ? year : undefined);
+    const href = getDashboardHref(nextView, nextView === "sheets" ? year ?? latestYear : undefined);
     const currentQuery = searchParams.toString();
     const currentHref = `${pathname}${currentQuery ? `?${currentQuery}` : ""}`;
     if (currentHref !== href) router.push(href, { scroll: false });
@@ -197,17 +198,13 @@ export default function Dashboard({ username }: DashboardProps) {
     setError(null);
     try {
       const response = await fetch(`/api/taxpayers?year=${encodeURIComponent(activeYear)}&limit=5000`, { cache: "no-store" });
-      const payload = await response.json() as { rows?: TaxpayerRow[]; summary?: Summary; years?: string[]; error?: string };
+      const payload = await response.json() as { rows?: TaxpayerRow[]; years?: string[]; error?: string };
       if (!response.ok) throw new Error(payload.error ?? "Không thể tải danh sách.");
       setRows(payload.rows ?? []);
-      if (activeYear === "all" && !overviewSummaryLoaded.current) {
-        overviewSummaryLoaded.current = true;
-        setOverviewSummary(payload.summary ?? EMPTY_SUMMARY);
-      }
       if (payload.years?.length) {
         setYears(payload.years);
         if (viewMode === "sheets" && !payload.years.includes(selectedYear)) {
-          const fallbackYear = payload.years[0];
+          const fallbackYear = getLatestYear(payload.years);
           setSelectedYear(fallbackYear);
           router.replace(getDashboardHref("sheets", fallbackYear), { scroll: false });
         }
@@ -217,17 +214,6 @@ export default function Dashboard({ username }: DashboardProps) {
       setRows([]);
     } finally {
       setIsLoading(false);
-    }
-  }
-
-  async function loadOverviewSummary() {
-    try {
-      const response = await fetch("/api/taxpayers?year=all&limit=5000", { cache: "no-store" });
-      const payload = await response.json() as { summary?: Summary; error?: string };
-      if (!response.ok) throw new Error(payload.error ?? "Không thể tải thống kê tổng hợp.");
-      setOverviewSummary(payload.summary ?? EMPTY_SUMMARY);
-    } catch (summaryError) {
-      console.error("overview summary load failed", summaryError);
     }
   }
 
@@ -253,14 +239,6 @@ export default function Dashboard({ username }: DashboardProps) {
     // The active year is the intended refresh boundary for this dashboard.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeYear, viewMode]);
-
-  useEffect(() => {
-    if (overviewSummaryLoaded.current || viewMode === "overview") return;
-    overviewSummaryLoaded.current = true;
-    void loadOverviewSummary();
-    // The overview KPI source is loaded once when the initial tab is not overview.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   useEffect(() => {
     if (!notice) return;
@@ -367,6 +345,7 @@ export default function Dashboard({ username }: DashboardProps) {
 
     let mode: "start" | "continue" = "start";
     let processedTotal = 0;
+    let skippedTotal = 0;
     try {
       while (true) {
         const response = await fetch("/api/taxpayers/refresh-all", {
@@ -380,20 +359,22 @@ export default function Dashboard({ username }: DashboardProps) {
           done?: boolean;
           processed?: number;
           pending?: number;
+          skipped?: number;
           queue?: { dead_letter?: number };
         };
         if (!response.ok && response.status !== 202) throw new Error(payload.error ?? "Không thể bắt đầu cập nhật toàn bộ.");
 
         processedTotal += payload.processed ?? 0;
+        skippedTotal += payload.skipped ?? 0;
         const pending = payload.pending ?? 0;
         setRefreshAllProgress({ processed: processedTotal, pending });
         if (payload.done || pending === 0) {
           await loadData();
-          await loadOverviewSummary();
           const deadLetterCount = payload.queue?.dead_letter ?? 0;
+          const skippedMessage = skippedTotal ? ` Bỏ qua ${skippedTotal.toLocaleString("vi-VN")} MST vì dữ liệu endpoint cũ hơn DB.` : "";
           setNotice(deadLetterCount
-            ? `Đã xử lý xong hàng đợi. Còn ${deadLetterCount.toLocaleString("vi-VN")} MST lỗi cần kiểm tra lại.`
-            : `Đã cập nhật toàn bộ ${processedTotal.toLocaleString("vi-VN")} lượt MST.`);
+            ? `Đã xử lý xong hàng đợi. Còn ${deadLetterCount.toLocaleString("vi-VN")} MST lỗi cần kiểm tra lại.${skippedMessage}`
+            : `Đã cập nhật toàn bộ ${processedTotal.toLocaleString("vi-VN")} lượt MST.${skippedMessage}`);
           break;
         }
 
@@ -426,7 +407,6 @@ export default function Dashboard({ username }: DashboardProps) {
       const payload = await response.json() as { error?: string; message?: string };
       if (!response.ok && response.status !== 202) throw new Error(payload.error ?? "Không thể cập nhật MST.");
       await loadData();
-      await loadOverviewSummary();
       if (payload.message) setError(payload.message);
     } catch (refreshError) {
       setError(refreshError instanceof Error ? refreshError.message : "Không thể cập nhật MST.");
@@ -552,7 +532,6 @@ export default function Dashboard({ username }: DashboardProps) {
       navigateToView("sheets", newYear);
       setNotice(`Đã thêm MST ${taxCode} vào năm ${newYear}.`);
       await loadData();
-      await loadOverviewSummary();
       const warnings = [payload.refreshWarning, payload.activityWarning].filter(Boolean);
       if (warnings.length) setError(warnings.join(" "));
     } catch (addError) {
@@ -603,7 +582,6 @@ export default function Dashboard({ username }: DashboardProps) {
       setDeleteTarget(null);
       setNotice(payload.message ?? `Đã xóa MST ${deletedTaxCode} khỏi danh mục.`);
       await loadData();
-      await loadOverviewSummary();
       if (payload.activityWarning) setError(payload.activityWarning);
     } catch (deleteRequestError) {
       setDeleteError(deleteRequestError instanceof Error ? deleteRequestError.message : "Không thể xóa MST.");
@@ -617,13 +595,6 @@ export default function Dashboard({ username }: DashboardProps) {
     { label: "Theo năm", icon: Table, mode: "sheets" as ViewMode },
     { label: "Lịch sử", icon: ClockCounterClockwise, mode: "activity" as ViewMode },
   ];
-  const sidebarKpis = [
-    { label: "Tổng cộng", value: overviewSummary.total, tone: "total" },
-    { label: "Đang hoạt động", value: overviewSummary.active, tone: "active" },
-    { label: "Không hoạt động", value: overviewSummary.inactive, tone: "inactive" },
-    { label: "Lỗi đồng bộ", value: overviewSummary.errors, tone: "error" },
-  ];
-
   return (
     <div className="dashboard-frame">
       <aside className="dashboard-sidebar">
@@ -650,9 +621,6 @@ export default function Dashboard({ username }: DashboardProps) {
         <nav className="sidebar-nav" aria-label="Hệ thống">
           <button className={`sidebar-link sidebar-link-settings ${viewMode === "settings" ? "sidebar-link-active" : ""}`} type="button" onClick={() => navigateToView("settings")}><Gear size={18} /> <span>Cấu hình</span></button>
         </nav>
-        <div className="sidebar-kpis" aria-label="Chỉ số mã số thuế">
-          {sidebarKpis.map((kpi) => <div className={`sidebar-kpi sidebar-kpi-${kpi.tone}`} key={kpi.label}><span>{kpi.label}</span><div className="sidebar-kpi-value"><strong>{kpi.value.toLocaleString("vi-VN")}</strong><small>nhà cung ứng</small></div></div>)}
-        </div>
       </aside>
 
       <div className="dashboard-main">

@@ -105,18 +105,6 @@ button:not(:disabled):active { transform: translateY(1px); }
 .sidebar-link-active { color: var(--accent-dark); background: var(--accent-soft); border-color: var(--accent-border); font-weight: 720; }
 .sidebar-link-active:hover { color: var(--accent-dark); background: var(--accent-soft); }
 .sidebar-link-settings { font-size: 12px; }
-.sidebar-kpis { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; margin: auto 9px 0; }
-.sidebar-kpi { position: relative; display: grid; gap: 2px; min-height: 61px; padding: 7px 7px 7px; }
-.sidebar-kpi::before { position: absolute; top: 10px; left: 0; width: 3px; height: 14px; background: var(--sidebar-kpi-accent); border-radius: 0 3px 3px 0; content: ""; }
-.sidebar-kpi span { padding-left: 6px; color: var(--muted); font-size: 10px; font-weight: 620; line-height: 1.25; }
-.sidebar-kpi-value { display: flex; align-items: baseline; gap: 5px; min-width: 0; padding-left: 6px; }
-.sidebar-kpi strong { color: var(--ink); font-size: 19px; font-weight: 730; letter-spacing: -0.035em; font-variant-numeric: tabular-nums; }
-.sidebar-kpi small { overflow: hidden; color: var(--muted); font-size: 9px; font-weight: 500; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
-.sidebar-kpi-total { --sidebar-kpi-accent: var(--accent); }
-.sidebar-kpi-active { --sidebar-kpi-accent: var(--success); }
-.sidebar-kpi-inactive { --sidebar-kpi-accent: var(--danger); }
-.sidebar-kpi-error { --sidebar-kpi-accent: var(--warning); }
-
 .dashboard-main { min-width: 0; }
 .dashboard-topbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 72px; padding: 0 clamp(22px, 3.5vw, 54px); background: rgba(248, 250, 252, 0.96); border-bottom: 1px solid var(--line); }
 .header-app-identity { display: flex; align-items: center; gap: 11px; min-width: 0; }
@@ -295,7 +283,7 @@ button:not(:disabled):active { transform: translateY(1px); }
   .dashboard-frame { display: block; }
   .dashboard-sidebar { position: static; height: auto; min-height: auto; padding: 0 14px; border-right: 0; border-bottom: 1px solid var(--line); box-shadow: inset 4px 0 0 var(--accent); }
   .sidebar-brand { min-height: 62px; justify-content: center; padding: 0 14px; }
-  .sidebar-nav, .sidebar-section-label, .sidebar-kpis { display: none; }
+  .sidebar-nav, .sidebar-section-label { display: none; }
   .dashboard-topbar { min-height: 64px; padding: 0 16px; }
   .header-app-identity > div > span { display: none; }
   .user-chip { max-width: 155px; }

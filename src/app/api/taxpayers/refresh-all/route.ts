@@ -65,13 +65,14 @@ export async function POST(request: Request) {
   }
 
   if (mode === "continue" && queue.pending === 0) {
-    return NextResponse.json({ ok: true, done: true, enqueued, processed: 0, pending: 0, queue });
+    return NextResponse.json({ ok: true, done: true, enqueued, processed: 0, skipped: 0, pending: 0, queue });
   }
 
   try {
     const workerPayload = await invokeTaxpayerBatchRefresh();
     queue = await getQueueStatus(supabase);
     const processed = workerPayload.processed ?? 0;
+    const skipped = workerPayload.results?.filter((result) => result.skipped).length ?? 0;
     const done = queue.pending === 0;
 
     return NextResponse.json({
@@ -79,6 +80,7 @@ export async function POST(request: Request) {
       done,
       enqueued,
       processed,
+      skipped,
       pending: queue.pending,
       queue,
       message: done

@@ -85,17 +85,10 @@ export async function GET(request: Request) {
   const taxpayerRecords = (taxpayers as TaxpayerRecord[] | null) ?? [];
   const byTaxCode = new Map(taxpayerRecords.map((taxpayer) => [taxpayer.tax_code, taxpayer]));
   const rows = sourceRows.map((source) => ({ ...source, taxpayer: byTaxCode.get(source.tax_code) ?? null }));
-  const uniqueTaxpayers = [...new Map(rows.filter((row) => row.taxpayer).map((row) => [row.tax_code, row.taxpayer!])).values()];
 
   return NextResponse.json({
     rows,
     years,
-    summary: {
-      total: uniqueTaxpayers.length,
-      active: uniqueTaxpayers.filter((taxpayer) => taxpayer.status_group === "active").length,
-      inactive: uniqueTaxpayers.filter((taxpayer) => taxpayer.status_group === "inactive").length,
-      errors: uniqueTaxpayers.filter((taxpayer) => Boolean(taxpayer.last_error)).length,
-    },
   });
 }
 
