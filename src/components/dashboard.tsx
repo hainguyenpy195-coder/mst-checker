@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowsClockwise,
   CaretRight,
@@ -19,11 +20,13 @@ import {
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
+import { getDashboardHref, getDashboardViewFromPathname, type DashboardView } from "@/lib/dashboard-routes";
 import { isValidTaxCode, normalizeTaxCode, TAX_CODE_FORMAT_HINT, TAX_CODE_INPUT_PATTERN } from "@/lib/tax-code";
 
 const DEFAULT_YEARS = ["2023", "2024", "2025", "2026"];
+const DEFAULT_YEAR = "2025";
 const PAGE_SIZE = 100;
-type ViewMode = "overview" | "sheets" | "activity" | "settings";
+type ViewMode = DashboardView;
 
 type TaxpayerDetail = {
   tax_code: string;
@@ -106,9 +109,14 @@ function activityLabel(action: ActivityRow["action"]) {
 }
 
 export default function Dashboard({ username }: DashboardProps) {
-  const [viewMode, setViewMode] = useState<ViewMode>("overview");
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const viewMode = getDashboardViewFromPathname(pathname);
+  const requestedYear = searchParams.get("year");
+  const routeYear = requestedYear && /^\d{4}$/.test(requestedYear) ? requestedYear : null;
   const [years, setYears] = useState<string[]>(DEFAULT_YEARS);
-  const [selectedYear, setSelectedYear] = useState("2025");
+  const [selectedYear, setSelectedYear] = useState(routeYear ?? DEFAULT_YEAR);
   const [rows, setRows] = useState<TaxpayerRow[]>([]);
   const [summary, setSummary] = useState<Summary>({ total: 0, active: 0, inactive: 0, errors: 0 });
   const [activityRows, setActivityRows] = useState<ActivityRow[]>([]);
@@ -141,6 +149,31 @@ export default function Dashboard({ username }: DashboardProps) {
 
   const activeYear = viewMode === "sheets" ? selectedYear : viewMode === "overview" ? "all" : null;
 
+  useEffect(() => {
+    if (viewMode !== "sheets") return;
+
+    const nextYear = routeYear ?? DEFAULT_YEAR;
+    setSelectedYear(nextYear);
+    if (requestedYear !== nextYear) {
+      router.replace(getDashboardHref("sheets", nextYear), { scroll: false });
+    }
+  }, [requestedYear, routeYear, router, viewMode]);
+
+  function navigateToView(nextView: ViewMode, year = selectedYear) {
+    setError(null);
+    if (nextView === "activity" || nextView === "settings") closeAddForm();
+
+    const href = getDashboardHref(nextView, nextView === "sheets" ? year : undefined);
+    const currentQuery = searchParams.toString();
+    const currentHref = `${pathname}${currentQuery ? `?${currentQuery}` : ""}`;
+    if (currentHref !== href) router.push(href, { scroll: false });
+  }
+
+  function selectYear(year: string) {
+    setSelectedYear(year);
+    navigateToView("sheets", year);
+  }
+
   async function loadData() {
     if (!activeYear) return;
     setIsLoading(true);
@@ -153,7 +186,11 @@ export default function Dashboard({ username }: DashboardProps) {
       setSummary(payload.summary ?? { total: 0, active: 0, inactive: 0, errors: 0 });
       if (payload.years?.length) {
         setYears(payload.years);
-        if (!payload.years.includes(selectedYear)) setSelectedYear(payload.years[0]);
+        if (viewMode === "sheets" && !payload.years.includes(selectedYear)) {
+          const fallbackYear = payload.years[0];
+          setSelectedYear(fallbackYear);
+          router.replace(getDashboardHref("sheets", fallbackYear), { scroll: false });
+        }
       }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Không thể tải danh sách.");
@@ -243,8 +280,7 @@ export default function Dashboard({ username }: DashboardProps) {
   async function search(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!query.trim()) return;
-    setViewMode("overview");
-    setError(null);
+    navigateToView("overview");
   }
 
   function clearSearch() {
@@ -417,7 +453,7 @@ export default function Dashboard({ username }: DashboardProps) {
       setNewNote("");
       resetTaxCodeLookup();
       setSelectedYear(newYear);
-      setViewMode("sheets");
+      navigateToView("sheets", newYear);
       setNotice(`Đã thêm MST ${taxCode} vào năm ${newYear}.`);
       await loadData();
       const warnings = [payload.refreshWarning, payload.activityWarning].filter(Boolean);
@@ -504,9 +540,7 @@ export default function Dashboard({ username }: DashboardProps) {
               key={label}
               type="button"
               onClick={() => {
-                setViewMode(mode);
-                setError(null);
-                if (mode === "activity") closeAddForm();
+                navigateToView(mode);
               }}
             >
               <Icon size={18} weight="regular" />
@@ -516,7 +550,7 @@ export default function Dashboard({ username }: DashboardProps) {
         </nav>
         <div className="sidebar-section-label sidebar-section-spaced">HỆ THỐNG</div>
         <nav className="sidebar-nav" aria-label="Hệ thống">
-          <button className={`sidebar-link sidebar-link-settings ${viewMode === "settings" ? "sidebar-link-active" : ""}`} type="button" onClick={() => { setViewMode("settings"); closeAddForm(); setError(null); }}><Gear size={18} /> <span>Cấu hình</span></button>
+          <button className={`sidebar-link sidebar-link-settings ${viewMode === "settings" ? "sidebar-link-active" : ""}`} type="button" onClick={() => navigateToView("settings")}><Gear size={18} /> <span>Cấu hình</span></button>
         </nav>
         <div className="sidebar-kpis" aria-label="Chỉ số mã số thuế">
           {sidebarKpis.map((kpi) => <div className={`sidebar-kpi sidebar-kpi-${kpi.tone}`} key={kpi.label}><span>{kpi.label}</span><div className="sidebar-kpi-value"><strong>{kpi.value.toLocaleString("vi-VN")}</strong><small>nhà cung ứng</small></div></div>)}
@@ -569,7 +603,7 @@ export default function Dashboard({ username }: DashboardProps) {
 
             {viewMode === "sheets" ? (
               <div className="sheet-tabs" role="tablist" aria-label="Chọn năm">
-                {years.map((year) => <button key={year} className={selectedYear === year ? "sheet-tab sheet-tab-active" : "sheet-tab"} type="button" role="tab" aria-selected={selectedYear === year} onClick={() => setSelectedYear(year)}>{year}<span>Năm theo dõi</span></button>)}
+                {years.map((year) => <button key={year} className={selectedYear === year ? "sheet-tab sheet-tab-active" : "sheet-tab"} type="button" role="tab" aria-selected={selectedYear === year} onClick={() => selectYear(year)}>{year}<span>Năm theo dõi</span></button>)}
               </div>
             ) : null}
 
