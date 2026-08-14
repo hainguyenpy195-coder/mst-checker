@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { authenticateRequest } from "@/lib/app-auth";
 import { normalizeInvoiceLookupCode, normalizeInvoiceLookupUrl } from "@/lib/invoice-extraction";
 import { INVOICE_SELECT } from "@/lib/invoice-db";
+import { attachInvoiceTaxpayers } from "@/lib/invoice-taxpayer";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { InvoiceRecord } from "@/lib/invoice-types";
 
@@ -45,7 +46,8 @@ async function readUpdatedInvoice(supabase: ReturnType<typeof createAdminClient>
     .eq("id", invoiceId)
     .single();
   if (error || !data) throw new Error("Không thể đọc hóa đơn sau khi cập nhật.");
-  return data;
+  const [invoice] = await attachInvoiceTaxpayers(supabase, [data as unknown as InvoiceRecord]);
+  return invoice;
 }
 
 async function saveLookup(invoiceId: string, body: VerifyBody) {

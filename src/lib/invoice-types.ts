@@ -1,11 +1,24 @@
 export type InvoiceVerificationStatus = "unverified" | "valid" | "invalid" | "error";
 
+export type TaxpayerRefreshState = "queued" | "running" | "success" | "retry" | "dead_letter";
+
+export type InvoiceTaxpayerSummary = {
+  tax_code: string;
+  name: string | null;
+  status: string | null;
+  status_group: string | null;
+  last_checked_at: string | null;
+  last_error: string | null;
+  refresh_state: TaxpayerRefreshState | null;
+};
+
 export type InvoiceRecord = {
   id: string;
   invoice_number: string;
   invoice_number_key: string;
   seller_tax_code: string | null;
   seller_name: string | null;
+  seller_taxpayer?: InvoiceTaxpayerSummary | null;
   invoice_template_number: string | null;
   invoice_symbol: string | null;
   lookup_url: string | null;

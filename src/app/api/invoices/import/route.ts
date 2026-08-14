@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { authenticateRequest } from "@/lib/app-auth";
 import { INVOICE_MODEL_ID, extractInvoiceFromFile, getInvoiceMaxUploadBytes, getInvoiceMonthlyScanLimit, normalizeExtractedInvoice, resolveInvoiceFileDescriptor, sha256Hex } from "@/lib/invoice-extraction";
 import { INVOICE_SELECT } from "@/lib/invoice-db";
+import { attachInvoiceTaxpayers, ensureInvoiceTaxpayer } from "@/lib/invoice-taxpayer";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { invokeTaxpayerRefresh } from "@/lib/xinvoice-worker";
+import type { InvoiceRecord } from "@/lib/invoice-types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -138,9 +141,70 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Không thể lưu thông tin hóa đơn vào cơ sở dữ liệu." }, { status: 500 });
   }
 
+  let invoiceWithTaxpayer = invoice as unknown as InvoiceRecord;
+  let taxpayerSync: {
+    status: "not_applicable" | "existing" | "added" | "pending" | "error";
+    message?: string;
+  } = { status: "not_applicable" };
+
+  const normalizedSellerTaxCode = extracted.seller_tax_code;
+  if (normalizedSellerTaxCode) {
+    try {
+      const ensureResult = await ensureInvoiceTaxpayer(supabase, {
+        sellerTaxCode: normalizedSellerTaxCode,
+        sellerName: extracted.seller_name,
+        invoiceDate: extracted.invoice_date,
+        sourceFileName: fileName,
+      });
+
+      if (!ensureResult.taxCode) {
+        taxpayerSync = {
+          status: "error",
+          message: "MST bên bán không đúng định dạng nên chưa được đưa vào danh mục MST.",
+        };
+      } else {
+        taxpayerSync = { status: ensureResult.created ? "added" : "existing" };
+
+        if (ensureResult.created) {
+          try {
+            const workerPayload = await invokeTaxpayerRefresh(ensureResult.taxCode);
+            const workerResult = workerPayload.results?.find((result) => result.tax_code === ensureResult.taxCode);
+            if (workerPayload.processed === 0 || !workerResult) {
+              taxpayerSync = {
+                status: "pending",
+                message: "MST mới đã được đưa vào hàng đợi và đang chờ worker cập nhật.",
+              };
+            } else if (!workerResult.ok) {
+              taxpayerSync = {
+                status: "error",
+                message: workerResult.error ?? "Worker chưa cập nhật được MST mới.",
+              };
+            }
+          } catch (workerError) {
+            console.error("invoice taxpayer worker invocation failed", workerError);
+            taxpayerSync = {
+              status: "pending",
+              message: "MST mới đã được lưu nhưng chưa gọi được worker cập nhật.",
+            };
+          }
+        }
+      }
+
+      const [enrichedInvoice] = await attachInvoiceTaxpayers(supabase, [invoiceWithTaxpayer]);
+      if (enrichedInvoice) invoiceWithTaxpayer = enrichedInvoice as InvoiceRecord;
+    } catch (taxpayerError) {
+      console.error("invoice taxpayer synchronization failed", taxpayerError);
+      taxpayerSync = {
+        status: "error",
+        message: "Đã lưu hóa đơn nhưng chưa đồng bộ được MST bên bán vào danh mục MST.",
+      };
+    }
+  }
+
   return NextResponse.json({
     ok: true,
-    invoice,
+    invoice: invoiceWithTaxpayer,
+    taxpayerSync,
     usage: { used: quota.used, limit: quota.limit, remaining: Math.max(0, quota.limit - quota.used) },
   }, { status: 201 });
 }

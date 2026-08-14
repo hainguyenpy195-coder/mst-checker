@@ -16,7 +16,7 @@ import {
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
-import type { InvoiceQuota, InvoiceRecord, InvoiceVerificationStatus } from "@/lib/invoice-types";
+import type { InvoiceQuota, InvoiceRecord, InvoiceTaxpayerSummary, InvoiceVerificationStatus } from "@/lib/invoice-types";
 
 const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
 const PAGE_SIZE = 100;
@@ -35,6 +35,7 @@ type InvoiceListResponse = {
     invalid: number;
     error: number;
   };
+  taxpayerSync?: { status?: string; message?: string };
   error?: string;
 };
 
@@ -103,6 +104,58 @@ function statusLabel(status: InvoiceVerificationStatus) {
   return statusMeta[status] ?? statusMeta.unverified;
 }
 
+function comparableTaxCode(value: string | null) {
+  return value?.trim().replace(/\s+/g, "").replace(/[–—]/g, "-") ?? "";
+}
+
+function taxpayerStatusMeta(taxpayer: InvoiceTaxpayerSummary | null | undefined) {
+  if (!taxpayer) {
+    return {
+      label: "Chưa có dữ liệu",
+      className: "invoice-taxpayer-status invoice-taxpayer-unknown",
+      title: "MST chưa có dữ liệu trong danh mục tổng hợp.",
+    };
+  }
+
+  if (taxpayer.last_error && taxpayer.refresh_state !== "success") {
+    return {
+      label: "Lỗi kiểm tra",
+      className: "invoice-taxpayer-status invoice-taxpayer-error",
+      title: taxpayer.last_error,
+    };
+  }
+
+  if (taxpayer.refresh_state === "queued" || taxpayer.refresh_state === "running" || taxpayer.refresh_state === "retry") {
+    return {
+      label: "Đang kiểm tra",
+      className: "invoice-taxpayer-status invoice-taxpayer-pending",
+      title: "MST đã được đưa vào hàng đợi kiểm tra.",
+    };
+  }
+
+  if (taxpayer.status_group === "active") {
+    return {
+      label: "Đang hoạt động",
+      className: "invoice-taxpayer-status invoice-taxpayer-active",
+      title: taxpayer.status ?? "MST đang hoạt động.",
+    };
+  }
+
+  if (taxpayer.status_group === "inactive") {
+    return {
+      label: "Ngừng hoạt động",
+      className: "invoice-taxpayer-status invoice-taxpayer-inactive",
+      title: taxpayer.status ?? "MST ngừng hoạt động.",
+    };
+  }
+
+  return {
+    label: "Chưa có dữ liệu",
+    className: "invoice-taxpayer-status invoice-taxpayer-unknown",
+    title: taxpayer.status ?? "Chưa có dữ liệu trạng thái MST.",
+  };
+}
+
 function patchRows(current: InvoiceRecord[], nextInvoice: InvoiceRecord) {
   return current.map((row) => row.id === nextInvoice.id ? nextInvoice : row);
 }
@@ -125,6 +178,7 @@ export default function InvoicePanel() {
   const [verification, setVerification] = useState<VerificationState | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const verificationIdRef = useRef<string | null>(null);
+  const taxpayerPollTimersRef = useRef<Set<number>>(new Set());
 
   const loadInvoices = useCallback(async (signal?: AbortSignal) => {
     setIsLoading(true);
@@ -151,6 +205,35 @@ export default function InvoicePanel() {
     }
   }, [page, query, statusFilter]);
 
+  const pollTaxpayerStatus = useCallback((taxCode: string, attempt = 0) => {
+    if (attempt >= 6) return;
+
+    const timer = window.setTimeout(async () => {
+      taxpayerPollTimersRef.current.delete(timer);
+      try {
+        const response = await fetch("/api/invoices/taxpayer-status?taxCode=" + encodeURIComponent(taxCode), { cache: "no-store" });
+        const payload = await response.json() as { taxpayer?: InvoiceTaxpayerSummary | null };
+        if (!response.ok) {
+          pollTaxpayerStatus(taxCode, attempt + 1);
+          return;
+        }
+
+        const taxpayer = payload.taxpayer ?? null;
+        setRows((current) => current.map((row) => comparableTaxCode(row.seller_tax_code) === taxCode
+          ? { ...row, seller_taxpayer: taxpayer }
+          : row));
+
+        if (taxpayer?.refresh_state === "queued" || taxpayer?.refresh_state === "running" || taxpayer?.refresh_state === "retry") {
+          pollTaxpayerStatus(taxCode, attempt + 1);
+        }
+      } catch {
+        pollTaxpayerStatus(taxCode, attempt + 1);
+      }
+    }, attempt === 0 ? 800 : 1500);
+
+    taxpayerPollTimersRef.current.add(timer);
+  }, []);
+
   useEffect(() => {
     const controller = new AbortController();
     void loadInvoices(controller.signal);
@@ -162,6 +245,11 @@ export default function InvoicePanel() {
     const timeout = window.setTimeout(() => setNotice(null), 4500);
     return () => window.clearTimeout(timeout);
   }, [notice]);
+
+  useEffect(() => () => {
+    for (const timer of taxpayerPollTimersRef.current) window.clearTimeout(timer);
+    taxpayerPollTimersRef.current.clear();
+  }, []);
 
   const selectFile = useCallback((file: File | null) => {
     if (!file) return;
@@ -205,6 +293,14 @@ export default function InvoicePanel() {
       setPage(1);
       setNotice("Đã trích xuất và lưu hóa đơn " + (payload.invoice?.invoice_number ?? "") + ".");
       await loadInvoices();
+
+      const sellerTaxCode = comparableTaxCode(payload.invoice?.seller_tax_code ?? null);
+      if (sellerTaxCode && (payload.taxpayerSync?.status === "pending"
+        || payload.invoice?.seller_taxpayer?.refresh_state === "queued"
+        || payload.invoice?.seller_taxpayer?.refresh_state === "running"
+        || payload.invoice?.seller_taxpayer?.refresh_state === "retry")) {
+        pollTaxpayerStatus(sellerTaxCode);
+      }
     } catch (importError) {
       setError(importError instanceof Error ? importError.message : "Không thể import hóa đơn.");
     } finally {
@@ -416,6 +512,7 @@ type InvoiceTableRowProps = {
 
 const InvoiceTableRow = memo(function InvoiceTableRow({ invoice, isBusy, onVerify }: InvoiceTableRowProps) {
   const status = statusLabel(invoice.verification_status);
+  const taxpayerStatus = taxpayerStatusMeta(invoice.seller_taxpayer);
   const identity = effectiveInvoiceIdentity(invoice);
   const canVerify = Boolean(invoice.invoice_number);
   return <tr className="data-row invoice-data-row">
@@ -423,7 +520,7 @@ const InvoiceTableRow = memo(function InvoiceTableRow({ invoice, isBusy, onVerif
       <div className="invoice-number-action"><strong>{invoice.invoice_number}</strong><button className="invoice-verify-button" type="button" disabled={!canVerify || isBusy} title={canVerify ? "Mở thông tin tra cứu của nhà cung cấp" : "Thiếu số hóa đơn"} onClick={() => onVerify(invoice)}><ShieldCheck size={15} /> {isBusy ? "Đang mở" : "Đối chiếu"}</button></div>
       {invoice.verification_message ? <small title={invoice.verification_message}>{invoice.verification_message}</small> : null}
     </td>
-    <td><strong>{invoice.seller_name ?? "Chưa có tên"}</strong><small className="mono-value">{invoice.seller_tax_code ?? "Chưa có MST"}</small></td>
+    <td><strong>{invoice.seller_name ?? "Chưa có tên"}</strong>{invoice.seller_tax_code ? <div className="invoice-seller-tax"><small className="mono-value">{invoice.seller_tax_code}</small><span className={taxpayerStatus.className} title={taxpayerStatus.title}>{taxpayerStatus.label}</span></div> : <small className="mono-value">Chưa có MST</small>}</td>
     <td><span>{identity.templateNumber && identity.symbol ? identity.templateNumber + identity.symbol : identity.symbol ?? "—"}</span><small>Mẫu {identity.templateNumber ?? "—"} · Ký hiệu {identity.symbol ?? "—"}</small></td>
     <td className="amount-cell">{formatAmount(invoice.tax_amount)}</td>
     <td className="amount-cell">{formatAmount(invoice.total_amount)}</td>

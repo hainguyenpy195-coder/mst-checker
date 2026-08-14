@@ -321,6 +321,13 @@ button:not(:disabled):active { transform: translateY(1px); }
 .invoice-number-action { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .invoice-number-action strong { color: var(--accent-dark) !important; font-size: 13px !important; font-variant-numeric: tabular-nums; }
 .invoice-data-table td small { max-width: 255px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.invoice-seller-tax { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 3px; }
+.invoice-seller-tax .mono-value { margin-top: 0; }
+.invoice-taxpayer-status { display: inline-flex; align-items: center; min-height: 20px; padding: 0 6px; border: 1px solid transparent; border-radius: 999px; font-size: 9px; font-weight: 720; line-height: 1; white-space: nowrap; }
+.invoice-taxpayer-active { color: var(--success); background: var(--success-soft); border-color: var(--success-border); }
+.invoice-taxpayer-inactive, .invoice-taxpayer-error { color: var(--danger); background: var(--danger-soft); border-color: var(--danger-border); }
+.invoice-taxpayer-pending { color: var(--warning); background: var(--warning-soft); border-color: var(--warning-border); }
+.invoice-taxpayer-unknown { color: var(--muted); background: var(--surface-soft); border-color: var(--line); }
 .invoice-verify-button { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 0 8px; color: var(--accent-dark); background: var(--accent-soft); border: 1px solid var(--accent-border); border-radius: 8px; font-size: 10px; font-weight: 700; white-space: nowrap; }
 .invoice-verify-button:hover:not(:disabled) { color: #ffffff; background: var(--accent); border-color: var(--accent); }
 .invoice-verify-button:disabled { color: var(--muted); background: var(--surface-soft); border-color: var(--line); }
