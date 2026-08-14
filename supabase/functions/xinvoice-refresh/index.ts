@@ -614,6 +614,20 @@ Deno.serve(async (request) => {
 
   const results = await Promise.all((jobs ?? []).map((job, index) => processJob(job as RefreshJob, index)));
 
+  const batchLog: Record<string, number | string> = {
+    event: "taxpayer_refresh_batch_completed",
+    refreshMode: statusOnly ? "status" : "data",
+    processed: results.length,
+    succeeded: results.filter((result) => result.ok && !result.skipped).length,
+    skipped: results.filter((result) => result.ok && result.skipped).length,
+    failed: results.filter((result) => !result.ok).length,
+  };
+  if (statusOnly) {
+    batchLog.primaryAssigned = Math.min(STATUS_PRIMARY_BATCH_SIZE, results.length);
+    batchLog.fallbackAssigned = Math.max(0, results.length - STATUS_PRIMARY_BATCH_SIZE);
+  }
+  console.log(JSON.stringify(batchLog));
+
   return new Response(JSON.stringify({ processed: results.length, results }), {
     headers: { "content-type": "application/json" },
   });
