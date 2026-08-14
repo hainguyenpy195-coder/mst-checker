@@ -3,6 +3,7 @@ import ExcelJS from "exceljs";
 import { authenticateRequest } from "@/lib/app-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { readAllPages, readInCodeBatches } from "@/lib/supabase-pagination";
+import { addTaxpayerWorksheet, type TaxpayerWorkbookExportRow } from "@/lib/taxpayer-excel";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -103,35 +104,7 @@ export async function GET(request: Request) {
   const years = [...grouped.keys()].sort((left, right) => Number(left) - Number(right));
 
   for (const year of years) {
-    const worksheet = workbook.addWorksheet(year.slice(0, 31));
-    worksheet.mergeCells("A1:H1");
-    const titleCell = worksheet.getCell("A1");
-    titleCell.value = `PHỤ LỤC 2: DANH SÁCH MST NGƯỜI BÁN THEO CÁC HÓA ĐƠN NĂM ${year}`;
-    titleCell.font = { name: "Arial", size: 14, bold: true, color: { argb: "FF1F2937" } };
-    titleCell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
-    worksheet.getRow(1).height = 34;
-
-    const headers = ["STT", "Tên người bán", "Mã số thuế", "Mặt hàng", "Tình trạng hoạt động của MST", "Thời điểm tra cứu lần trước", "Thời điểm tra cứu mới nhất", "Ghi chú (note tình trạng của những đối tượng có sự thay đổi so với lần tra cứu trước)"];
-    worksheet.getRow(2).values = headers;
-    worksheet.getRow(2).font = { name: "Arial", size: 10, bold: true, color: { argb: "FFFFFFFF" } };
-    worksheet.getRow(2).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0B83C6" } };
-    worksheet.getRow(2).alignment = { horizontal: "center", vertical: "middle", wrapText: true };
-    worksheet.getRow(2).height = 42;
-    worksheet.views = [{ state: "frozen", ySplit: 2 }];
-    worksheet.autoFilter = "A2:H2";
-    worksheet.columns = [
-      { key: "index", width: 8 },
-      { key: "name", width: 42 },
-      { key: "taxCode", width: 20 },
-      { key: "item", width: 2 },
-      { key: "status", width: 34 },
-      { key: "previousCheckedAt", width: 25 },
-      { key: "lastCheckedAt", width: 25 },
-      { key: "note", width: 58 },
-    ];
-    worksheet.getColumn(4).hidden = true;
-
-    (grouped.get(year) ?? []).forEach((source, index) => {
+    const exportRows: TaxpayerWorkbookExportRow[] = (grouped.get(year) ?? []).map((source) => {
       const taxpayer = byTaxCode.get(source.tax_code);
       const statusChange = latestStatusChangeByTaxCode.get(source.tax_code);
       const noteParts = [
@@ -139,21 +112,16 @@ export async function GET(request: Request) {
         statusChange ? text(statusChange.new_status) : "",
         text(taxpayer?.last_error),
       ].filter(Boolean);
-      const note = [...new Set(noteParts)].join(" | ");
-      const row = worksheet.addRow([
-        index + 1,
-        text(taxpayer?.name) || text(source.source_vendor_name),
-        text(source.tax_code),
-        "",
-        text(taxpayer?.status),
-        formatDate(taxpayer?.previous_checked_at ?? null),
-        formatDate(taxpayer?.last_checked_at ?? null),
-        note,
-      ]);
-      row.alignment = { vertical: "top", wrapText: true };
-      row.font = { name: "Arial", size: 10 };
-      if (index % 2 === 1) row.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF7FAFC" } };
+      return {
+        name: text(taxpayer?.name) || text(source.source_vendor_name),
+        taxCode: text(source.tax_code),
+        status: text(taxpayer?.status),
+        previousCheckedAt: formatDate(taxpayer?.previous_checked_at ?? null),
+        lastCheckedAt: formatDate(taxpayer?.last_checked_at ?? null),
+        note: [...new Set(noteParts)].join(" | "),
+      };
     });
+    addTaxpayerWorksheet(workbook, year, exportRows);
   }
 
   if (!years.length) workbook.addWorksheet("Danh sách trống");

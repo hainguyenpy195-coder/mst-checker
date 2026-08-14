@@ -8,6 +8,7 @@ type WorkerResult = {
 
 type WorkerRequest = {
   taxCode?: string;
+  taxCodes?: string[];
   preview?: boolean;
 };
 
@@ -66,8 +67,8 @@ export function invokeTaxpayerRefresh(taxCode: string) {
   return invokeWorker({ taxCode });
 }
 
-export function invokeTaxpayerBatchRefresh() {
-  return invokeWorker({});
+export function invokeTaxpayerBatchRefresh(taxCodes?: string[]) {
+  return invokeWorker(taxCodes?.length ? { taxCodes } : {});
 }
 
 export function invokeTaxpayerPreview(taxCode: string) {

@@ -25,6 +25,7 @@ import { getDashboardHref, getDashboardViewFromPathname, type DashboardView } fr
 import { isValidTaxCode, normalizeTaxCode, TAX_CODE_FORMAT_HINT, TAX_CODE_INPUT_PATTERN } from "@/lib/tax-code";
 import type { AppRole } from "@/lib/app-auth";
 import InvoicePanel from "@/components/invoice-panel";
+import TaxpayerExcelImportModal from "@/components/taxpayer-excel-import-modal";
 
 const DEFAULT_YEARS = ["2023", "2024", "2025", "2026"];
 const DEFAULT_YEAR = DEFAULT_YEARS[DEFAULT_YEARS.length - 1] ?? "2026";
@@ -194,6 +195,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
   const [newName, setNewName] = useState("");
   const [newYear, setNewYear] = useState("2026");
   const [newNote, setNewNote] = useState("");
+  const [showImportModal, setShowImportModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
@@ -225,7 +227,10 @@ export default function Dashboard({ username, role }: DashboardProps) {
 
   function navigateToView(nextView: ViewMode, year?: string) {
     setError(null);
-    if (nextView === "activity" || nextView === "invoices" || nextView === "settings") closeAddForm();
+    if (nextView === "activity" || nextView === "invoices" || nextView === "settings") {
+      closeAddForm();
+      setShowImportModal(false);
+    }
 
     const href = getDashboardHref(nextView, nextView === "sheets" ? year ?? latestYear : undefined);
     const currentQuery = searchParams.toString();
@@ -815,6 +820,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
             </div>
             {viewMode === "overview" || viewMode === "sheets" ? <div className="heading-actions">
               {canWrite ? <button className="outline-button" type="button" onClick={toggleAddForm} disabled={isRefreshingAll}><Plus size={17} /> Thêm MST</button> : null}
+              {canWrite ? <button className="outline-button" type="button" onClick={() => { setShowImportModal(true); setError(null); setNotice(null); }} disabled={isRefreshingAll}><FileText size={17} /> Nhập Excel</button> : null}
               <button className="export-button" type="button" onClick={() => void exportWorkbook()} disabled={isExporting || isRefreshingAll}><DownloadSimple size={17} /> {isExporting ? "Đang xuất" : "Xuất Excel"}</button>
             </div> : null}
           </div>
@@ -917,6 +923,15 @@ export default function Dashboard({ username, role }: DashboardProps) {
           <div className="confirm-actions"><button className="outline-button" type="button" disabled={isDeleting} onClick={() => { setDeleteTarget(null); setDeleteError(null); }}>Hủy</button><button className="danger-button" type="button" disabled={isDeleting} onClick={() => void deleteTaxpayer()}>{isDeleting ? "Đang xóa..." : "Xóa MST"}</button></div>
         </section>
       </div> : null}
+      {canWrite && showImportModal ? <TaxpayerExcelImportModal
+        onClose={() => setShowImportModal(false)}
+        onCompleted={(summary) => {
+          setNotice(summary.failedCount
+            ? "Đã hoàn tất nhập Excel: thêm " + summary.addedCount.toLocaleString("vi-VN") + " MST, cập nhật thành công " + summary.updatedCount.toLocaleString("vi-VN") + "."
+            : "Đã hoàn tất nhập Excel: thêm và cập nhật " + summary.addedCount.toLocaleString("vi-VN") + " MST.");
+          void loadData();
+        }}
+      /> : null}
     </div>
   );
 }

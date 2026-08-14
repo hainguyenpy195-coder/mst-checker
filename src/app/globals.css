@@ -280,6 +280,42 @@ button:not(:disabled):active { transform: translateY(1px); }
 .confirm-dialog p strong { color: var(--ink); font-variant-numeric: tabular-nums; }
 .confirm-error { display: flex; align-items: center; gap: 7px; margin-top: 16px; padding: 10px 11px; color: var(--danger); background: var(--danger-soft); border: 1px solid var(--danger-border); border-radius: var(--radius-control); font-size: 12px; }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 23px; }
+.taxpayer-import-dialog { width: min(100%, 760px); max-height: calc(100vh - 40px); overflow: auto; }
+.taxpayer-import-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.taxpayer-import-icon { color: var(--accent-dark); background: var(--accent-soft); border-color: var(--accent-border); }
+.taxpayer-import-description { margin-bottom: 18px !important; }
+.taxpayer-import-file-picker { display: grid; justify-items: center; gap: 8px; padding: 24px 18px; color: var(--accent-dark); background: var(--surface-soft); border: 1px dashed var(--accent-border); border-radius: 14px; text-align: center; }
+.taxpayer-import-file-picker > input { display: none; }
+.taxpayer-import-file-picker strong { max-width: 100%; color: var(--ink); font-size: 13px; overflow-wrap: anywhere; }
+.taxpayer-import-file-picker span { color: var(--muted); font-size: 11px; }
+.taxpayer-import-file-picker .outline-button { margin-top: 4px; min-height: 36px; }
+.taxpayer-import-template-link { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 15px !important; color: var(--muted) !important; font-size: 11px !important; }
+.taxpayer-import-template-link svg { color: var(--accent-dark); }
+.taxpayer-import-template-link a { color: var(--accent-dark); font-weight: 700; text-decoration: underline; }
+.taxpayer-import-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 19px; }
+.taxpayer-import-summary-grid > div { display: grid; gap: 5px; min-height: 70px; padding: 12px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 12px; }
+.taxpayer-import-summary-grid strong { color: var(--accent-dark); font-size: 21px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.taxpayer-import-summary-grid span { color: var(--muted); font-size: 10px; line-height: 1.35; }
+.taxpayer-import-message, .taxpayer-import-warning { display: flex; align-items: flex-start; gap: 8px; margin-top: 15px; padding: 10px 12px; border-radius: var(--radius-control); font-size: 12px; line-height: 1.45; }
+.taxpayer-import-message { color: var(--success); background: var(--success-soft); border: 1px solid var(--success-border); }
+.taxpayer-import-warning { color: var(--warning); background: var(--warning-soft); border: 1px solid var(--warning-border); }
+.taxpayer-import-candidate-list { display: grid; gap: 8px; margin-top: 17px; }
+.taxpayer-import-candidate-list > strong { color: var(--ink-soft); font-size: 12px; }
+.taxpayer-import-candidate-scroll { max-height: 220px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+.taxpayer-import-candidate-row { display: grid; grid-template-columns: 130px minmax(0, 1fr) 100px; gap: 10px; padding: 9px 11px; color: var(--ink-soft); border-bottom: 1px solid var(--line-soft); font-size: 11px; }
+.taxpayer-import-candidate-row:last-child { border-bottom: 0; }
+.taxpayer-import-candidate-row:nth-child(even) { background: var(--surface-soft); }
+.taxpayer-import-candidate-list small { color: var(--muted); font-size: 10px; }
+.taxpayer-import-progress { display: grid; justify-items: center; gap: 12px; margin-top: 27px; color: var(--accent-dark); text-align: center; }
+.taxpayer-import-progress strong { color: var(--ink); font-size: 15px; }
+.taxpayer-import-progress > span { max-width: 500px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.taxpayer-import-progress-track { width: min(100%, 540px); height: 9px; overflow: hidden; background: var(--line-soft); border-radius: 999px; }
+.taxpayer-import-progress-track span { display: block; height: 100%; background: var(--accent); border-radius: inherit; transition: width 180ms ease; }
+.taxpayer-import-complete, .taxpayer-import-error { display: grid; justify-items: center; gap: 10px; margin-top: 25px; color: var(--success); text-align: center; }
+.taxpayer-import-complete strong, .taxpayer-import-error strong { max-width: 600px; color: var(--ink); font-size: 14px; line-height: 1.55; }
+.taxpayer-import-complete .taxpayer-import-warning { width: 100%; color: var(--warning); text-align: left; }
+.taxpayer-import-error { color: var(--danger); }
+.taxpayer-import-error > span { max-width: 530px; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .danger-button { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 15px; color: #ffffff; background: var(--danger); border: 1px solid var(--danger); border-radius: var(--radius-control); box-shadow: 0 7px 16px rgba(128, 47, 60, 0.22); font-size: 13px; font-weight: 680; transition: background 150ms ease, border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease; }
 .danger-button:hover:not(:disabled) { background: #873541; border-color: #873541; box-shadow: 0 10px 22px rgba(128, 47, 60, 0.28); transform: translateY(-1px); }
 .danger-button:disabled { cursor: wait; opacity: 0.72; }
@@ -450,6 +486,10 @@ button:not(:disabled):active { transform: translateY(1px); }
   .mobile-activity-skeleton span:nth-child(3) { width: 88%; }
   .page-notice { top: 76px; right: 16px; }
   .confirm-dialog { padding: 23px 20px; }
+  .taxpayer-import-dialog { max-height: calc(100vh - 24px); }
+  .taxpayer-import-summary-grid { grid-template-columns: 1fr 1fr; }
+  .taxpayer-import-candidate-row { grid-template-columns: 105px minmax(0, 1fr); }
+  .taxpayer-import-candidate-row > span:last-child { grid-column: 2; color: var(--muted); }
   .invoice-intro { flex-direction: column; padding: 19px; }
   .invoice-quota { width: 100%; }
   .invoice-import-card { padding: 18px 16px; }

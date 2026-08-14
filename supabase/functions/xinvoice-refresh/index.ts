@@ -7,6 +7,7 @@ type RefreshJob = {
 
 type RefreshRequest = {
   taxCode?: string;
+  taxCodes?: string[];
   preview?: boolean;
 };
 
@@ -409,6 +410,15 @@ Deno.serve(async (request) => {
     return new Response(JSON.stringify({ error: "Invalid tax code format" }), { status: 400, headers: { "content-type": "application/json" } });
   }
 
+  const requestedTaxCodes = Array.isArray(body.taxCodes)
+    ? [...new Set(body.taxCodes
+      .filter((taxCode): taxCode is string => typeof taxCode === "string")
+      .map((taxCode) => normalizeTaxCode(taxCode)))]
+    : [];
+  if (Array.isArray(body.taxCodes) && (body.taxCodes.length !== requestedTaxCodes.length || !requestedTaxCodes.length || requestedTaxCodes.some((taxCode) => !isValidTaxCode(taxCode)))) {
+    return new Response(JSON.stringify({ error: "Invalid tax code list" }), { status: 400, headers: { "content-type": "application/json" } });
+  }
+
   // Preview is used while adding a new MST. It intentionally does not claim
   // a queue job or write anything to Supabase; it only reads the configured
   // endpoints and returns the latest available lookup data.
@@ -448,7 +458,9 @@ Deno.serve(async (request) => {
 
   const { data: jobs, error: claimError } = requestedTaxCode
     ? await supabase.rpc("claim_refresh_job", { p_tax_code: requestedTaxCode })
-    : await supabase.rpc("claim_refresh_batch", { p_limit: 10 });
+    : requestedTaxCodes.length
+      ? await supabase.rpc("claim_refresh_jobs", { p_tax_codes: requestedTaxCodes, p_limit: 10 })
+      : await supabase.rpc("claim_refresh_batch", { p_limit: 10 });
   if (claimError) {
     return new Response(JSON.stringify({ error: claimError.message }), { status: 500, headers: { "content-type": "application/json" } });
   }

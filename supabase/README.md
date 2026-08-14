@@ -13,6 +13,8 @@ legacy short-lived server-side sessions for the previous Cục Thuế CAPTCHA fl
 The invoice migrations add provider-specific lookup URL and lookup code fields;
 the current invoice UI opens those provider pages because each provider can use
 a different CAPTCHA mechanism.
+Migration `202608140007_taxpayer_excel_import.sql` adds the atomic bulk-import
+function and targeted worker queue claim used by the Excel import workflow.
 
 ## Initial data
 
@@ -61,9 +63,20 @@ supabase functions deploy xinvoice-refresh --no-verify-jwt
 Run migration `202608130008_manual_refresh_only.sql` (or `cron.sql`) to remove
 the old scheduled jobs. Refreshes are started manually from the application:
 the overview button queues the full catalogue and drains it in batches, while
-the row button sends a targeted `taxCode` request. The worker claims at most
-ten batch rows per invocation and uses retry/backoff. It must not be configured
-to bypass XInvoice limits or use rotating proxies.
+the row button sends a targeted `taxCode` request. Excel import sends only the
+new MST codes from the workbook through targeted batches. The worker claims at
+most ten batch rows per invocation and uses retry/backoff. It must not be
+configured to bypass XInvoice limits or use rotating proxies.
+
+## Taxpayer Excel import
+
+The administrator can use **Nhập Excel** on the overview or yearly list. Each
+worksheet must be named with a four-digit year, and the importer reads all
+worksheets using the same columns as the export workbook. It filters against
+the aggregate `taxpayers` table, creates one taxpayer row per new MST, keeps
+each worksheet year in `taxpayer_sources`, and then refreshes only those new
+MST codes through the worker. Existing MSTs and invalid rows are reported and
+skipped.
 
 Hosted Edge Functions provide `SUPABASE_SECRET_KEYS` as a JSON dictionary and
 the worker reads its `default` entry. It also accepts the singular
