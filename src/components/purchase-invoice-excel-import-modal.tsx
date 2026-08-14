@@ -38,6 +38,7 @@ type PreviewResponse = {
   importId?: string;
   fileName?: string;
   candidates?: PurchaseInvoiceCandidate[];
+  totalCandidates?: number;
   counts?: {
     totalRows?: number;
     validRows?: number;
@@ -111,6 +112,7 @@ export default function PurchaseInvoiceExcelImportModal({ onClose, onCompleted }
   const isBusy = phase === "committing";
   const candidates = preview?.candidates ?? [];
   const counts = preview?.counts;
+  const candidateCount = Math.max(0, preview?.totalCandidates ?? counts?.validRows ?? candidates.length);
 
   function chooseFile(nextFile: File | null) {
     setFile(nextFile);
@@ -174,9 +176,9 @@ export default function PurchaseInvoiceExcelImportModal({ onClose, onCompleted }
   }
 
   async function startImport() {
-    if (!importId || !candidates.length || isBusy) return;
+    if (!importId || !candidateCount || isBusy) return;
 
-    const total = candidates.length;
+    const total = candidateCount;
     let offset = 0;
     let addedCount = 0;
     let skippedCount = 0;
@@ -250,20 +252,20 @@ export default function PurchaseInvoiceExcelImportModal({ onClose, onCompleted }
 
     return <>
       <div className="taxpayer-import-summary-grid">
-        <div><strong>{formatCount(counts?.new ?? candidates.length)}</strong><span>Dòng dự kiến thêm</span></div>
+        <div><strong>{formatCount(counts?.new ?? candidateCount)}</strong><span>Dòng dự kiến thêm</span></div>
         <div><strong>{formatCount(counts?.existing)}</strong><span>Dòng đã có trong CSDL</span></div>
         <div><strong>{formatCount(counts?.duplicateRows)}</strong><span>Dòng trùng trong file</span></div>
         <button className={`taxpayer-import-summary-card${warnings.length ? " is-clickable" : ""}`} type="button" disabled={!warnings.length} aria-expanded={showWarnings} onClick={() => setShowWarnings((current) => !current)}>
           <strong>{formatCount(warnings.length)}</strong><span>Cảnh báo dữ liệu</span>{warnings.length ? <small>{showWarnings ? "Ẩn chi tiết" : "Xem chi tiết"}</small> : null}
         </button>
       </div>
-      <div className="taxpayer-import-message" role="status"><CheckCircle size={18} /> {preview?.message ?? `Đã đọc ${formatCount(candidates.length)} dòng hóa đơn hợp lệ.`}</div>
+      <div className="taxpayer-import-message" role="status"><CheckCircle size={18} /> {preview?.message ?? `Đã đọc ${formatCount(candidateCount)} dòng hóa đơn hợp lệ.`}</div>
       {preview?.selectedSheet ? <div className="taxpayer-import-template-link"><FileText size={16} /><span>Sheet được chọn: <strong>{preview.selectedSheet}</strong></span></div> : null}
       {candidates.length ? <div className="taxpayer-import-candidate-list"><strong>Một số dòng hóa đơn sẽ được lưu</strong><div className="taxpayer-import-candidate-scroll">{candidates.slice(0, 30).map((candidate, index) => {
         const label = candidateLabel(candidate);
         const source = [candidate.source_sheet, candidate.source_row ? `dòng ${candidate.source_row}` : null].filter(Boolean).join(" · ");
         return <div className="taxpayer-import-candidate-row" key={candidate.row_fingerprint ?? `${candidate.source_sheet}-${candidate.source_row}-${index}`}><span><strong>{label.invoiceNumber}</strong> · {formatVietnameseDate(candidate.invoice_issue_date)}</span><span>{label.seller}{source ? ` · ${source}` : ""}</span></div>;
-      })}</div>{candidates.length > 30 ? <small>Đang hiển thị 30/{formatCount(candidates.length)} hóa đơn.</small> : null}</div> : null}
+      })}</div>{candidateCount > candidates.length ? <small>Đang hiển thị {formatCount(candidates.length)}/{formatCount(candidateCount)} dòng hóa đơn.</small> : null}</div> : null}
       {warnings.length ? <div className="taxpayer-import-warning"><WarningCircle size={16} /><span>File có {formatCount(warnings.length)} cảnh báo. Các dòng này vẫn được lưu nếu có dữ liệu nghiệp vụ.</span></div> : null}
       {showWarnings && warnings.length ? <div className="taxpayer-import-invalid-details"><div className="taxpayer-import-invalid-heading"><strong>Chi tiết cảnh báo dữ liệu</strong><span>Hiển thị tối đa 100 cảnh báo đầu tiên</span></div><div className="taxpayer-import-invalid-scroll">{warnings.map((warning, index) => <div className="taxpayer-import-invalid-row" key={`${warning.sourceSheet}-${warning.sourceRow}-${index}`}><span><strong>{warning.sourceSheet ?? "Sheet"}</strong> · dòng {warning.sourceRow ?? "—"}</span><span className="mono-value">Cảnh báo</span><span>{warning.message ?? "Dữ liệu cần được kiểm tra"}</span></div>)}</div></div> : null}
       {error ? <div className="confirm-error"><WarningCircle size={16} /> {error}</div> : null}
@@ -295,7 +297,7 @@ export default function PurchaseInvoiceExcelImportModal({ onClose, onCompleted }
       <div className="confirm-actions">
         {isBusy || isReading ? null : <button className="outline-button" type="button" onClick={onClose}>{phase === "complete" || phase === "error" || !file ? "Đóng" : "Hủy"}</button>}
         {phase === "select" ? <button className="export-button" type="button" disabled={!file || isReading || Boolean(file && file.size > MAX_UPLOAD_BYTES)} onClick={() => void readAndFilterFile()}>{isReading ? "Đang đọc Excel" : "Đọc và lọc hóa đơn"}</button> : null}
-        {phase === "preview" && candidates.length ? <button className="export-button" type="button" onClick={() => void startImport()}>Xác nhận nhập {formatCount(candidates.length)} dòng</button> : null}
+        {phase === "preview" && candidateCount ? <button className="export-button" type="button" onClick={() => void startImport()}>Xác nhận nhập {formatCount(candidateCount)} dòng</button> : null}
       </div>
     </section>
   </div>;

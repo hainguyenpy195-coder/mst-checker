@@ -15,6 +15,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+// Keep the Vercel Function response well below its body-size limit. The full
+// candidate list remains in the server-side import session; the UI only needs
+// a short sample to let the user validate the selected worksheet.
+const PREVIEW_CANDIDATE_LIMIT = 30;
+// SHA-256 fingerprints are much longer than tax codes. Keeping this low
+// avoids an oversized PostgREST `in (...)` query string.
+const FINGERPRINT_LOOKUP_BATCH_SIZE = 100;
+
 type PurchaseInvoiceFingerprintRecord = { row_fingerprint: string };
 
 async function markImportFailed(
@@ -103,7 +111,7 @@ export async function POST(request: Request) {
     ? await readInCodeBatches(fingerprints, (batch) => supabase
       .from("purchase_invoices")
       .select("row_fingerprint")
-      .in("row_fingerprint", batch))
+      .in("row_fingerprint", batch), FINGERPRINT_LOOKUP_BATCH_SIZE)
     : { data: [], error: null };
   if (existingResult.error) {
     const message = "Không thể kiểm tra hóa đơn đã có trong cơ sở dữ liệu.";
@@ -152,7 +160,8 @@ export async function POST(request: Request) {
     ok: true,
     importId: importSession.id,
     fileName: importSession.file_name,
-    candidates,
+    candidates: candidates.slice(0, PREVIEW_CANDIDATE_LIMIT),
+    totalCandidates: candidates.length,
     counts,
     warnings: parsed.warnings,
     selectedSheet: parsed.selectedSheet,

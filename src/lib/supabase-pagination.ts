@@ -28,10 +28,14 @@ export async function readAllPages<T>(
 export async function readInCodeBatches<T>(
   taxCodes: string[],
   fetchBatch: (batch: string[]) => PromiseLike<SupabaseReadResult<T>>,
+  batchSize = CODE_BATCH_SIZE,
 ) {
+  const safeBatchSize = Number.isSafeInteger(batchSize) && batchSize > 0
+    ? batchSize
+    : CODE_BATCH_SIZE;
   const batches: string[][] = [];
-  for (let index = 0; index < taxCodes.length; index += CODE_BATCH_SIZE) {
-    batches.push(taxCodes.slice(index, index + CODE_BATCH_SIZE));
+  for (let index = 0; index < taxCodes.length; index += safeBatchSize) {
+    batches.push(taxCodes.slice(index, index + safeBatchSize));
   }
 
   const results = await Promise.all(batches.map((batch) => fetchBatch(batch)));

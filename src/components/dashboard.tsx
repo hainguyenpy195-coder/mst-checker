@@ -1157,8 +1157,8 @@ export default function Dashboard({ username, role }: DashboardProps) {
   const navItems = [
     { label: "Tổng hợp", icon: SquaresFour, mode: "overview" as ViewMode },
     { label: "Theo năm", icon: Table, mode: "sheets" as ViewMode },
-    { label: "Hóa đơn", icon: Receipt, mode: "invoices" as ViewMode },
     { label: "Mua vào", icon: ShoppingCart, mode: "purchases" as ViewMode },
+    { label: "Hóa đơn", icon: Receipt, mode: "invoices" as ViewMode },
     { label: "Lịch sử", icon: ClockCounterClockwise, mode: "activity" as ViewMode },
   ];
   return (
