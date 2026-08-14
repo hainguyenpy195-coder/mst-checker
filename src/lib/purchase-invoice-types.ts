@@ -27,6 +27,18 @@ export type PurchaseInvoiceParseWarning = {
   message: string;
 };
 
+export type PurchaseInvoiceFutureIssueDateSample = {
+  sourceSheet: string;
+  sourceRow: number;
+  invoiceIssueDate: string;
+};
+
+export type PurchaseInvoiceFutureIssueDateWarning = {
+  asOfDate: string;
+  count: number;
+  samples: PurchaseInvoiceFutureIssueDateSample[];
+};
+
 export type PurchaseInvoiceCandidateSheet = {
   sheetName: string;
   headerRow: number;
@@ -41,6 +53,7 @@ export type PurchaseInvoiceParseResult = {
   validRows: number;
   duplicateRows: number;
   warnings: PurchaseInvoiceParseWarning[];
+  futureIssueDateWarning: PurchaseInvoiceFutureIssueDateWarning;
   selectedSheet: string;
   candidateSheets: PurchaseInvoiceCandidateSheet[];
 };

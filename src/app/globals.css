@@ -451,9 +451,40 @@ button:not(:disabled):active { transform: translateY(1px); }
 .purchase-invoice-page { margin-top: 0; }
 .purchase-toolbar-tools { align-items: flex-end; }
 .purchase-date-range { display: flex; align-items: flex-end; gap: 8px; }
-.purchase-date-filter { display: grid; gap: 4px; color: var(--muted); font-size: 10px; font-weight: 650; }
-.purchase-date-filter input { min-width: 136px; min-height: 36px; padding: 0 9px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-control); outline: 0; font: inherit; font-size: 12px; }
-.purchase-date-filter input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.purchase-date-picker { display: grid; min-width: 146px; gap: 4px; }
+.purchase-date-picker-label { color: var(--muted); font-size: 10px; font-weight: 650; line-height: 1.2; }
+.purchase-date-picker-control { position: relative; }
+.purchase-date-picker-trigger { display: flex; align-items: center; width: 100%; min-height: 36px; gap: 7px; padding: 0 32px 0 9px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-control); font-size: 12px; font-variant-numeric: tabular-nums; line-height: 1; text-align: left; transition: color 150ms ease, background 150ms ease, border-color 150ms ease, box-shadow 150ms ease; }
+.purchase-date-picker-trigger:hover { background: var(--surface-hover); border-color: var(--line-strong); }
+.purchase-date-picker-trigger:focus-visible { border-color: var(--accent); outline: 0; box-shadow: 0 0 0 3px var(--accent-ring); }
+.purchase-date-picker-trigger svg { flex: 0 0 auto; color: var(--accent-dark); }
+.purchase-date-picker-trigger span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.purchase-date-picker-trigger .is-placeholder { color: var(--muted); }
+.purchase-date-picker-clear { position: absolute; top: 50%; right: 5px; display: grid; width: 25px; height: 25px; place-items: center; padding: 0; color: var(--ink-soft); background: transparent; border: 0; border-radius: 7px; transform: translateY(-50%); transition: color 150ms ease, background 150ms ease; }
+.purchase-date-picker-clear:hover { color: var(--accent-dark); background: var(--accent-soft); }
+.purchase-date-picker-clear:focus-visible { outline: 0; box-shadow: 0 0 0 2px var(--accent-ring); }
+.purchase-date-picker-popover { position: fixed; z-index: 80; width: min(324px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow-y: auto; padding: 12px; color: var(--ink); background: var(--surface); border: 1px solid var(--accent-border); border-radius: 13px; box-shadow: 0 18px 38px rgba(21, 49, 78, 0.24); }
+.purchase-date-picker-month-heading { display: grid; grid-template-columns: 30px minmax(0, 1fr) 30px; align-items: center; gap: 6px; }
+.purchase-date-picker-month-heading strong { overflow: hidden; color: var(--ink); font-size: 12px; font-weight: 730; line-height: 30px; text-align: center; text-overflow: ellipsis; text-transform: capitalize; white-space: nowrap; }
+.purchase-date-picker-month-button { display: grid; width: 30px; height: 30px; place-items: center; padding: 0; color: var(--accent-dark); background: transparent; border: 1px solid transparent; border-radius: 8px; transition: color 150ms ease, background 150ms ease, border-color 150ms ease; }
+.purchase-date-picker-month-button:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent-border); }
+.purchase-date-picker-month-button:focus-visible { border-color: var(--accent); outline: 0; box-shadow: 0 0 0 3px var(--accent-ring); }
+.purchase-date-picker-weekdays, .purchase-date-picker-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.purchase-date-picker-weekdays { margin-top: 10px; }
+.purchase-date-picker-weekdays span { color: var(--muted); font-size: 9px; font-weight: 730; line-height: 24px; text-align: center; }
+.purchase-date-picker-days { gap: 2px; }
+.purchase-date-picker-day { display: grid; width: 100%; min-height: 34px; place-items: center; padding: 0; color: var(--ink); background: transparent; border: 1px solid transparent; border-radius: 8px; font-size: 11px; font-variant-numeric: tabular-nums; font-weight: 620; line-height: 1; transition: color 130ms ease, background 130ms ease, border-color 130ms ease, box-shadow 130ms ease; }
+.purchase-date-picker-day:hover:not(:disabled):not(.is-selected) { color: var(--accent-dark); background: var(--accent-soft); }
+.purchase-date-picker-day:focus-visible { position: relative; z-index: 1; border-color: var(--accent); outline: 0; box-shadow: 0 0 0 2px var(--accent-ring); }
+.purchase-date-picker-day.is-outside-month { color: #a5b1c0; font-weight: 560; }
+.purchase-date-picker-day.is-today { color: var(--accent-dark); border-color: var(--accent-border); font-weight: 740; }
+.purchase-date-picker-day.is-selected { color: #ffffff; background: var(--accent); border-color: var(--accent); box-shadow: 0 3px 7px rgba(45, 77, 128, 0.22); }
+.purchase-date-picker-day:disabled { color: #b9c4d0; background: transparent; }
+.purchase-date-picker-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--line-soft); }
+.purchase-date-picker-text-button { min-height: 28px; padding: 0 7px; color: var(--ink-soft); background: transparent; border: 0; border-radius: 7px; font-size: 10px; font-weight: 700; transition: color 150ms ease, background 150ms ease; }
+.purchase-date-picker-text-button:hover:not(:disabled) { color: var(--accent-dark); background: var(--accent-soft); }
+.purchase-date-picker-text-button:focus-visible { outline: 0; box-shadow: 0 0 0 3px var(--accent-ring); }
+.purchase-date-picker-today-button { color: var(--accent-dark); }
 .purchase-invoice-table-section .table-toolbar { background: var(--header-surface); border-bottom: 1px solid var(--header-line); }
 .purchase-invoice-table-section .table-toolbar h2 { color: var(--header-ink); }
 .purchase-invoice-table-section .table-toolbar > div:first-child span { color: var(--header-muted); }
@@ -462,23 +493,27 @@ button:not(:disabled):active { transform: translateY(1px); }
 .purchase-invoice-table-section .table-search input { color: var(--header-ink); }
 .purchase-invoice-table-section .table-search input::placeholder { color: var(--header-muted); }
 .purchase-invoice-table-section .table-search button { color: var(--header-muted); }
-.purchase-invoice-table-section .purchase-date-filter { color: var(--header-muted); }
-.purchase-invoice-table-section .purchase-date-filter input { color: var(--header-ink); color-scheme: dark; background: rgba(255, 255, 255, 0.08); border-color: var(--header-line); }
-.purchase-invoice-table-section .purchase-date-filter input:focus { border-color: var(--header-accent); box-shadow: 0 0 0 3px rgba(143, 212, 236, 0.2); }
-.purchase-invoice-data-table { min-width: 1240px; }
+.purchase-invoice-table-section .purchase-date-picker-label { color: var(--header-muted); }
+.purchase-invoice-table-section .purchase-date-picker-trigger { color: var(--header-ink); background: rgba(255, 255, 255, 0.08); border-color: var(--header-line); }
+.purchase-invoice-table-section .purchase-date-picker-trigger:hover { background: rgba(255, 255, 255, 0.13); border-color: rgba(143, 212, 236, 0.42); }
+.purchase-invoice-table-section .purchase-date-picker-trigger:focus-visible { border-color: var(--header-accent); box-shadow: 0 0 0 3px rgba(143, 212, 236, 0.2); }
+.purchase-invoice-table-section .purchase-date-picker-trigger svg { color: var(--header-accent); }
+.purchase-invoice-table-section .purchase-date-picker-trigger .is-placeholder { color: var(--header-muted); }
+.purchase-invoice-table-section .purchase-date-picker-clear { color: var(--header-muted); }
+.purchase-invoice-table-section .purchase-date-picker-clear:hover { color: var(--header-ink); background: rgba(143, 212, 236, 0.16); }
+.purchase-invoice-data-table { min-width: 1170px; }
 .purchase-invoice-number-cell { width: 108px; min-width: 108px; }
 .purchase-invoice-number-cell strong { font-variant-numeric: tabular-nums; }
 .purchase-seller-cell { min-width: 235px; }
 .purchase-goods-cell { min-width: 300px; max-width: 430px; }
 .purchase-goods-cell > span { display: -webkit-box; overflow: hidden; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .purchase-department-cell { min-width: 125px; white-space: nowrap; }
-.purchase-detail-action-cell { width: 1%; white-space: nowrap; }
-.purchase-detail-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 30px; padding: 0 9px; color: var(--accent-dark); background: var(--accent-soft); border: 1px solid var(--accent-border); border-radius: 8px; font-size: 10px; font-weight: 700; white-space: nowrap; transition: color 150ms ease, background 150ms ease, border-color 150ms ease, transform 150ms ease; }
-.purchase-detail-button:hover { color: #ffffff; background: var(--accent); border-color: var(--accent); transform: translateY(-1px); }
-.purchase-detail-button:focus-visible { outline: 0; box-shadow: 0 0 0 3px var(--accent-ring); }
+.purchase-invoice-row { cursor: pointer !important; }
+.purchase-invoice-row:focus-visible { position: relative; z-index: 1; outline: 2px solid var(--accent); outline-offset: -2px; background: var(--accent-soft); }
 .purchase-invoice-detail-dialog { width: min(100%, 850px); max-height: calc(100dvh - 40px); overflow-y: auto; }
 .purchase-invoice-detail-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .purchase-invoice-detail-icon { color: var(--accent-dark); background: var(--accent-soft); border-color: var(--accent-border); }
+.purchase-invoice-detail-actions { justify-content: space-between; }
 .purchase-invoice-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 19px 0 0; }
 .purchase-invoice-detail-field { display: grid; align-content: start; gap: 5px; min-width: 0; min-height: 70px; padding: 11px 12px; background: var(--surface-soft); border: 1px solid var(--line-soft); border-radius: 10px; }
 .purchase-invoice-detail-field-wide { grid-column: 1 / -1; }
@@ -599,8 +634,8 @@ button:not(:disabled):active { transform: translateY(1px); }
   .invoice-table-section .toolbar-tools { flex-direction: column; align-items: stretch; }
   .invoice-table-section .table-search { width: 100%; }
   .purchase-date-range { width: 100%; }
-  .purchase-date-filter { flex: 1; }
-  .purchase-date-filter input { width: 100%; min-width: 0; }
+  .purchase-date-picker { min-width: 0; flex: 1; }
+  .purchase-date-picker-trigger { min-width: 0; }
   .purchase-invoice-detail-dialog { max-height: calc(100dvh - 24px); }
   .purchase-invoice-detail-grid { grid-template-columns: 1fr; }
   .purchase-invoice-detail-field-wide { grid-column: auto; }

@@ -135,6 +135,7 @@ export async function POST(request: Request) {
     selectedSheet: parsed.selectedSheet,
     candidateSheets: parsed.candidateSheets,
     warnings: parsed.warnings,
+    futureIssueDateWarning: parsed.futureIssueDateWarning,
   };
 
   const { error: previewError } = await supabase.from("purchase_invoice_imports").update({
@@ -164,6 +165,7 @@ export async function POST(request: Request) {
     totalCandidates: candidates.length,
     counts,
     warnings: parsed.warnings,
+    futureIssueDateWarning: parsed.futureIssueDateWarning,
     selectedSheet: parsed.selectedSheet,
     candidateSheets: parsed.candidateSheets,
     message: candidates.length

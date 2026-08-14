@@ -34,6 +34,16 @@ type ImportWarning = {
   message?: string | null;
 };
 
+type FutureIssueDateWarning = {
+  asOfDate?: string;
+  count?: number;
+  samples?: Array<{
+    sourceSheet?: string | null;
+    sourceRow?: number | null;
+    invoiceIssueDate?: string | null;
+  }>;
+};
+
 type PreviewResponse = {
   importId?: string;
   fileName?: string;
@@ -48,6 +58,7 @@ type PreviewResponse = {
     new?: number;
   };
   warnings?: ImportWarning[];
+  futureIssueDateWarning?: FutureIssueDateWarning;
   selectedSheet?: string;
   message?: string;
   error?: string;
@@ -249,6 +260,8 @@ export default function PurchaseInvoiceExcelImportModal({ onClose, onCompleted }
 
   function renderPreviewStep() {
     const warnings = preview?.warnings ?? [];
+    const futureIssueDateWarning = preview?.futureIssueDateWarning;
+    const futureIssueDateSamples = futureIssueDateWarning?.samples ?? [];
 
     return <>
       <div className="taxpayer-import-summary-grid">
@@ -260,6 +273,7 @@ export default function PurchaseInvoiceExcelImportModal({ onClose, onCompleted }
         </button>
       </div>
       <div className="taxpayer-import-message" role="status"><CheckCircle size={18} /> {preview?.message ?? `Đã đọc ${formatCount(candidateCount)} dòng hóa đơn hợp lệ.`}</div>
+      {futureIssueDateWarning?.count ? <div className="taxpayer-import-warning" role="status"><WarningCircle size={16} /><span>Phát hiện {formatCount(futureIssueDateWarning.count)} dòng có ngày phát hành sau ngày hiện tại ({formatVietnameseDate(futureIssueDateWarning.asOfDate)}). Hệ thống không thay đổi dữ liệu; bạn vẫn có thể tiếp tục nhập.</span>{futureIssueDateSamples.length ? <small>Ví dụ: {futureIssueDateSamples.map((sample) => `${sample.sourceSheet ?? "Sheet"} · dòng ${sample.sourceRow ?? "—"} · ${formatVietnameseDate(sample.invoiceIssueDate)}`).join("; ")}</small> : null}</div> : null}
       {preview?.selectedSheet ? <div className="taxpayer-import-template-link"><FileText size={16} /><span>Sheet được chọn: <strong>{preview.selectedSheet}</strong></span></div> : null}
       {candidates.length ? <div className="taxpayer-import-candidate-list"><strong>Một số dòng hóa đơn sẽ được lưu</strong><div className="taxpayer-import-candidate-scroll">{candidates.slice(0, 30).map((candidate, index) => {
         const label = candidateLabel(candidate);

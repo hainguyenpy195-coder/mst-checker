@@ -5,9 +5,9 @@ import {
   CaretLeft,
   CaretRight,
   CheckCircle,
-  Eye,
   FileText,
   MagnifyingGlass,
+  Trash,
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
@@ -16,6 +16,7 @@ import { isValidTaxCode, normalizeTaxCode } from "@/lib/tax-code";
 import PurchaseInvoiceExcelImportModal, {
   type PurchaseInvoiceImportSummary,
 } from "@/components/purchase-invoice-excel-import-modal";
+import VietnameseDatePicker from "@/components/purchase-date-picker";
 
 const PAGE_SIZE = 100;
 
@@ -182,6 +183,9 @@ export default function PurchaseInvoicePanel({ role }: { role: AppRole }) {
   const [isLoading, setIsLoading] = useState(true);
   const [showImportModal, setShowImportModal] = useState(false);
   const [detailInvoice, setDetailInvoice] = useState<PurchaseInvoiceRecord | null>(null);
+  const [deleteInvoiceTarget, setDeleteInvoiceTarget] = useState<PurchaseInvoiceRecord | null>(null);
+  const [isDeletingInvoice, setIsDeletingInvoice] = useState(false);
+  const [deleteInvoiceError, setDeleteInvoiceError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -271,6 +275,39 @@ export default function PurchaseInvoicePanel({ role }: { role: AppRole }) {
     void loadPurchases(undefined, 1);
   }
 
+  function openDeleteInvoiceDialog(invoice: PurchaseInvoiceRecord) {
+    if (!canWrite) return;
+    setDetailInvoice(null);
+    setDeleteInvoiceTarget(invoice);
+    setDeleteInvoiceError(null);
+  }
+
+  async function deletePurchaseInvoice() {
+    if (!canWrite || !deleteInvoiceTarget || isDeletingInvoice) return;
+
+    setIsDeletingInvoice(true);
+    setDeleteInvoiceError(null);
+    try {
+      const response = await fetch(`/api/purchase-invoices/${encodeURIComponent(deleteInvoiceTarget.id)}`, {
+        method: "DELETE",
+      });
+      const payload = await response.json().catch(() => ({})) as { error?: string; message?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Không thể xóa dòng hóa đơn.");
+
+      const deletedInvoiceNumber = deleteInvoiceTarget.invoice_number ?? "đã chọn";
+      const nextTotal = Math.max(0, total - 1);
+      const nextPage = Math.min(page, Math.max(1, Math.ceil(nextTotal / PAGE_SIZE)));
+      setDeleteInvoiceTarget(null);
+      setPage(nextPage);
+      setNotice(payload.message ?? `Đã xóa dòng hóa đơn ${deletedInvoiceNumber}.`);
+      await loadPurchases(undefined, nextPage);
+    } catch (deleteError) {
+      setDeleteInvoiceError(deleteError instanceof Error ? deleteError.message : "Không thể xóa dòng hóa đơn.");
+    } finally {
+      setIsDeletingInvoice(false);
+    }
+  }
+
   return <section className="invoice-page purchase-invoice-page">
     <div className="page-heading-row purchase-page-heading-row">
       <h1>Mua vào</h1>
@@ -286,16 +323,16 @@ export default function PurchaseInvoicePanel({ role }: { role: AppRole }) {
         <div className="toolbar-tools purchase-toolbar-tools">
           <label className="table-search"><MagnifyingGlass size={16} /><input value={query} onChange={(event) => updateQuery(event.target.value)} placeholder="Tìm số HĐ, nhà cung cấp, MST..." aria-label="Tìm hóa đơn mua vào" /><button type="button" title="Xóa tìm kiếm" aria-label="Xóa tìm kiếm" disabled={!query} onClick={() => updateQuery("")}><X size={15} /></button></label>
           <div className="purchase-date-range" role="group" aria-label="Lọc theo ngày phát hành hóa đơn">
-            <label className="purchase-date-filter"><span>Từ ngày</span><input type="date" lang="vi-VN" value={dateFrom} max={dateTo || undefined} onChange={(event) => updateDateFrom(event.target.value)} aria-label="Từ ngày phát hành" /></label>
-            <label className="purchase-date-filter"><span>Đến ngày</span><input type="date" lang="vi-VN" value={dateTo} min={dateFrom || undefined} onChange={(event) => updateDateTo(event.target.value)} aria-label="Đến ngày phát hành" /></label>
+            <VietnameseDatePicker label="Từ ngày" value={dateFrom} max={dateTo || undefined} onChange={updateDateFrom} />
+            <VietnameseDatePicker label="Đến ngày" value={dateTo} min={dateFrom || undefined} onChange={updateDateTo} />
           </div>
         </div>
       </div>
       <div className="table-scroll">
         <table className="data-table invoice-data-table purchase-invoice-data-table">
-          <thead><tr><th>Ngày HĐ</th><th>Số hóa đơn</th><th>Nhà cung cấp / MST</th><th>Mặt hàng / HHDV</th><th>Giá trị HHDV</th><th>VAT được khấu trừ</th><th>Mã bộ phận</th><th aria-label="Xem chi tiết" /></tr></thead>
+          <thead><tr><th>Ngày HĐ</th><th>Số hóa đơn</th><th>Nhà cung cấp / MST</th><th>Mặt hàng / HHDV</th><th>Giá trị HHDV</th><th>VAT được khấu trừ</th><th>Mã bộ phận</th></tr></thead>
           <tbody>
-            {isLoading ? <PurchaseInvoiceTableSkeleton /> : rows.length === 0 ? <tr><td colSpan={8}><div className="table-empty"><FileText size={26} /><strong>Chưa có hóa đơn mua vào</strong><span>{canWrite ? "Nhấn Nhập Excel để thêm danh sách hóa đơn từ workbook." : "Chưa có dữ liệu hóa đơn mua vào để hiển thị."}</span></div></td></tr> : rows.map((invoice) => <PurchaseInvoiceTableRow key={invoice.id} invoice={invoice} onViewDetail={setDetailInvoice} />)}
+            {isLoading ? <PurchaseInvoiceTableSkeleton /> : rows.length === 0 ? <tr><td colSpan={7}><div className="table-empty"><FileText size={26} /><strong>Chưa có hóa đơn mua vào</strong><span>{canWrite ? "Nhấn Nhập Excel để thêm danh sách hóa đơn từ workbook." : "Chưa có dữ liệu hóa đơn mua vào để hiển thị."}</span></div></td></tr> : rows.map((invoice) => <PurchaseInvoiceTableRow key={invoice.id} invoice={invoice} onViewDetail={setDetailInvoice} />)}
           </tbody>
         </table>
       </div>
@@ -303,7 +340,8 @@ export default function PurchaseInvoicePanel({ role }: { role: AppRole }) {
     </section>
 
     {canWrite && showImportModal ? <PurchaseInvoiceExcelImportModal onClose={() => setShowImportModal(false)} onCompleted={handleImportCompleted} /> : null}
-    {detailInvoice ? <PurchaseInvoiceDetailDialog invoice={detailInvoice} onClose={() => setDetailInvoice(null)} /> : null}
+    {detailInvoice ? <PurchaseInvoiceDetailDialog invoice={detailInvoice} canDelete={canWrite} onClose={() => setDetailInvoice(null)} onRequestDelete={() => openDeleteInvoiceDialog(detailInvoice)} /> : null}
+    {deleteInvoiceTarget ? <PurchaseInvoiceDeleteDialog invoice={deleteInvoiceTarget} isDeleting={isDeletingInvoice} error={deleteInvoiceError} onClose={() => { if (!isDeletingInvoice) { setDeleteInvoiceTarget(null); setDeleteInvoiceError(null); } }} onConfirm={() => void deletePurchaseInvoice()} /> : null}
   </section>;
 }
 
@@ -311,7 +349,24 @@ function PurchaseInvoiceTableRow({ invoice, onViewDetail }: { invoice: PurchaseI
   const taxpayerStatus = taxpayerStatusMeta(invoice);
   const taxCode = invoice.seller_tax_code?.trim() ? normalizeTaxCode(invoice.seller_tax_code) : null;
 
-  return <tr className="data-row invoice-data-row">
+  function openDetail() {
+    onViewDetail(invoice);
+  }
+
+  return <tr
+    className="data-row invoice-data-row purchase-invoice-row"
+    tabIndex={0}
+    role="button"
+    aria-label={`Xem chi tiết hóa đơn ${invoice.invoice_number ?? "chưa có số hóa đơn"}`}
+    aria-haspopup="dialog"
+    title="Chọn dòng để xem chi tiết"
+    onClick={openDetail}
+    onKeyDown={(event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      openDetail();
+    }}
+  >
     <td className="amount-cell">{formatVietnameseDate(invoice.invoice_issue_date)}</td>
     <td className="purchase-invoice-number-cell"><strong>{invoice.invoice_number ?? "—"}</strong></td>
     <td className="purchase-seller-cell"><strong>{invoice.seller_name ?? invoice.seller_taxpayer?.name ?? "Chưa có tên người bán"}</strong><div className="invoice-seller-tax"><small className="mono-value">{taxCode ?? "Chưa có MST"}</small><span className={taxpayerStatus.className} title={taxpayerStatus.title}>{taxpayerStatus.label}</span></div></td>
@@ -319,15 +374,14 @@ function PurchaseInvoiceTableRow({ invoice, onViewDetail }: { invoice: PurchaseI
     <td className="amount-cell">{formatAmount(invoice.net_amount)}</td>
     <td className="amount-cell">{formatAmount(invoice.deductible_vat_amount)}</td>
     <td className="purchase-department-cell"><span className="mono-value">{invoice.department_code ?? "—"}</span></td>
-    <td className="purchase-detail-action-cell"><button className="purchase-detail-button" type="button" onClick={() => onViewDetail(invoice)}><Eye size={15} /> Xem</button></td>
   </tr>;
 }
 
 function PurchaseInvoiceTableSkeleton() {
-  return <>{Array.from({ length: 7 }, (_, index) => <tr className="table-skeleton" key={index}>{Array.from({ length: 8 }, (_, cellIndex) => <td key={cellIndex}><span /></td>)}</tr>)}</>;
+  return <>{Array.from({ length: 7 }, (_, index) => <tr className="table-skeleton" key={index}>{Array.from({ length: 7 }, (_, cellIndex) => <td key={cellIndex}><span /></td>)}</tr>)}</>;
 }
 
-function PurchaseInvoiceDetailDialog({ invoice, onClose }: { invoice: PurchaseInvoiceRecord; onClose: () => void }) {
+function PurchaseInvoiceDetailDialog({ invoice, canDelete, onClose, onRequestDelete }: { invoice: PurchaseInvoiceRecord; canDelete: boolean; onClose: () => void; onRequestDelete: () => void }) {
   const taxpayerStatus = taxpayerStatusMeta(invoice);
   const taxCode = invoice.seller_tax_code?.trim() ? normalizeTaxCode(invoice.seller_tax_code) : "";
 
@@ -358,7 +412,21 @@ function PurchaseInvoiceDetailDialog({ invoice, onClose }: { invoice: PurchaseIn
         <PurchaseInvoiceDetailField label="Nguồn Excel" value={sourceLabel(invoice)} />
         <PurchaseInvoiceDetailField label="STT gốc trong sheet" value={invoice.source_stt == null ? null : String(invoice.source_stt)} />
       </dl>
-      <div className="confirm-actions"><button className="outline-button" type="button" onClick={onClose}>Đóng</button></div>
+      <div className="confirm-actions purchase-invoice-detail-actions">{canDelete ? <button className="danger-button" type="button" onClick={onRequestDelete}><Trash size={16} /> Xóa dòng này</button> : null}<button className="outline-button" type="button" onClick={onClose}>Đóng</button></div>
+    </section>
+  </div>;
+}
+
+function PurchaseInvoiceDeleteDialog({ invoice, isDeleting, error, onClose, onConfirm }: { invoice: PurchaseInvoiceRecord; isDeleting: boolean; error: string | null; onClose: () => void; onConfirm: () => void }) {
+  const invoiceNumber = invoice.invoice_number ?? "chưa có số hóa đơn";
+
+  return <div className="confirm-backdrop">
+    <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-purchase-invoice-title" aria-describedby="delete-purchase-invoice-description">
+      <div className="confirm-dialog-icon"><WarningCircle size={23} weight="duotone" /></div>
+      <h2 id="delete-purchase-invoice-title">Xóa dòng hóa đơn?</h2>
+      <p id="delete-purchase-invoice-description">Hóa đơn <strong>{invoiceNumber}</strong>{invoice.seller_name ? ` của ${invoice.seller_name}` : ""} sẽ bị xóa khỏi bảng tổng hợp. Chỉ dòng hạch toán đang chọn bị xóa; các dòng khác của cùng hóa đơn vẫn được giữ. Thao tác này không thể hoàn tác.</p>
+      {error ? <div className="confirm-error" role="alert"><WarningCircle size={16} /> {error}</div> : null}
+      <div className="confirm-actions"><button className="outline-button" type="button" disabled={isDeleting} onClick={onClose}>Hủy</button><button className="danger-button" type="button" disabled={isDeleting} onClick={onConfirm}>{isDeleting ? "Đang xóa..." : "Xóa dòng hóa đơn"}</button></div>
     </section>
   </div>;
 }

@@ -4,11 +4,13 @@ import { isValidTaxCode, normalizeTaxCode } from "@/lib/tax-code";
 import type {
   PurchaseInvoiceCandidate,
   PurchaseInvoiceCandidateSheet,
+  PurchaseInvoiceFutureIssueDateWarning,
   PurchaseInvoiceParseResult,
   PurchaseInvoiceParseWarning,
 } from "@/lib/purchase-invoice-types";
 
 export const DEFAULT_PURCHASE_INVOICE_EXCEL_MAX_ROWS = 10_000;
+const FUTURE_ISSUE_DATE_SAMPLE_LIMIT = 5;
 
 type PurchaseColumns = {
   serial: number;
@@ -42,6 +44,41 @@ function getMaxRows() {
   return Number.isFinite(configured) && configured > 0
     ? Math.floor(configured)
     : DEFAULT_PURCHASE_INVOICE_EXCEL_MAX_ROWS;
+}
+
+function getVietnamToday(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const year = parts.find((part) => part.type === "year")?.value ?? String(date.getUTCFullYear());
+  const month = parts.find((part) => part.type === "month")?.value ?? String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = parts.find((part) => part.type === "day")?.value ?? String(date.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getFutureIssueDateWarning(candidates: Iterable<PurchaseInvoiceCandidate>): PurchaseInvoiceFutureIssueDateWarning {
+  const asOfDate = getVietnamToday();
+  let count = 0;
+  const samples: PurchaseInvoiceFutureIssueDateWarning["samples"] = [];
+
+  for (const candidate of candidates) {
+    const issueDate = candidate.invoice_issue_date;
+    if (!issueDate || issueDate <= asOfDate) continue;
+
+    count += 1;
+    if (samples.length < FUTURE_ISSUE_DATE_SAMPLE_LIMIT) {
+      samples.push({
+        sourceSheet: candidate.source_sheet,
+        sourceRow: candidate.source_row,
+        invoiceIssueDate: issueDate,
+      });
+    }
+  }
+
+  return { asOfDate, count, samples };
 }
 
 function cleanOptionalText(value: string | null | undefined) {
@@ -396,12 +433,14 @@ export async function parsePurchaseInvoiceWorkbook(buffer: Buffer | Uint8Array):
     candidates.set(candidate.row_fingerprint, candidate);
   }
 
+  const candidateRows = [...candidates.values()];
   return {
-    candidates: [...candidates.values()],
+    candidates: candidateRows,
     totalRows,
     validRows: candidates.size,
     duplicateRows,
     warnings: warnings.slice(0, 100),
+    futureIssueDateWarning: getFutureIssueDateWarning(candidateRows),
     selectedSheet: selected.worksheet.name,
     candidateSheets: matches.map((match): PurchaseInvoiceCandidateSheet => ({
       sheetName: match.worksheet.name,
