@@ -317,6 +317,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
   const [manualLookup, setManualLookup] = useState<ManualLookupState | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [statusFilter, setStatusFilter] = useState("all");
+  const [unitFilter, setUnitFilter] = useState("all");
   const [newTaxCode, setNewTaxCode] = useState("");
   const [newName, setNewName] = useState("");
   const [newYear, setNewYear] = useState("2026");
@@ -471,8 +472,11 @@ export default function Dashboard({ username, role }: DashboardProps) {
   const displayRows = useMemo(() => {
     if (viewMode !== "overview") return rows;
 
+    const sourceRows = unitFilter === "all"
+      ? rows
+      : rows.filter((row) => taxpayerUnitKey(row) === unitFilter);
     const uniqueRows = new Map<string, TaxpayerRow>();
-    for (const row of rows) {
+    for (const row of sourceRows) {
       const existing = uniqueRows.get(row.tax_code);
       if (!existing) {
         uniqueRows.set(row.tax_code, { ...row, source_sheet: row.source_year ?? row.source_sheet });
@@ -488,7 +492,34 @@ export default function Dashboard({ username, role }: DashboardProps) {
       if (!existing.source_note && row.source_note) existing.source_note = row.source_note;
     }
     return [...uniqueRows.values()];
-  }, [rows, viewMode]);
+  }, [rows, unitFilter, viewMode]);
+
+  const unitFilterOptions = useMemo(() => {
+    const options = new Map<string, { value: string; label: string; order: number }>();
+
+    if (viewMode === "sheets") {
+      for (const unit of units) {
+        const value = taxpayerUnitRecordKey(unit);
+        options.set(value, {
+          value,
+          label: formatTaxpayerUnitHeading(unit.source_unit_key, unit.source_unit_label, unit.source_unit_order, unit.source_unit_marker),
+          order: unit.source_unit_order,
+        });
+      }
+    }
+
+    for (const row of rows) {
+      const value = taxpayerUnitKey(row);
+      if (options.has(value)) continue;
+      options.set(value, {
+        value,
+        label: taxpayerUnitHeading(row),
+        order: getTaxpayerUnitOrder(row.source_unit_key, row.source_unit_order),
+      });
+    }
+
+    return [...options.values()].sort((left, right) => left.order - right.order || left.label.localeCompare(right.label, "vi"));
+  }, [rows, units, viewMode]);
 
   const filteredRows = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -497,10 +528,11 @@ export default function Dashboard({ username, role }: DashboardProps) {
       const matchesStatus = statusFilter === "all"
         || (statusFilter === "error" && Boolean(row.taxpayer?.last_error))
         || (row.taxpayer?.status_group ?? "unknown") === statusFilter;
-      return matchesText && matchesStatus;
+      const matchesUnit = unitFilter === "all" || taxpayerUnitKey(row) === unitFilter;
+      return matchesText && matchesStatus && matchesUnit;
     });
     return viewMode === "sheets" ? [...result].sort(compareTaxpayerRowsByUnit) : result;
-  }, [displayRows, query, statusFilter, viewMode]);
+  }, [displayRows, query, statusFilter, unitFilter, viewMode]);
 
   const mobileLookupRows = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -511,7 +543,11 @@ export default function Dashboard({ username, role }: DashboardProps) {
   useEffect(() => {
     setCurrentPage(1);
     setExpandedRow(null);
-  }, [activeYear, query, statusFilter]);
+  }, [activeYear, query, statusFilter, unitFilter]);
+
+  useEffect(() => {
+    setUnitFilter("all");
+  }, [activeYear, viewMode]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const safePage = Math.min(currentPage, totalPages);
@@ -534,12 +570,14 @@ export default function Dashboard({ username, role }: DashboardProps) {
       rowsByUnit.set(key, groupRows);
     }
 
-    const sections = units.map((unit) => ({
-      key: taxpayerUnitRecordKey(unit),
-      label: formatTaxpayerUnitHeading(unit.source_unit_key, unit.source_unit_label, unit.source_unit_order, unit.source_unit_marker),
-      order: unit.source_unit_order,
-      rows: rowsByUnit.get(taxpayerUnitRecordKey(unit)) ?? [],
-    }));
+    const sections = units
+      .filter((unit) => unitFilter === "all" || taxpayerUnitRecordKey(unit) === unitFilter)
+      .map((unit) => ({
+        key: taxpayerUnitRecordKey(unit),
+        label: formatTaxpayerUnitHeading(unit.source_unit_key, unit.source_unit_label, unit.source_unit_order, unit.source_unit_marker),
+        order: unit.source_unit_order,
+        rows: rowsByUnit.get(taxpayerUnitRecordKey(unit)) ?? [],
+      }));
     const knownKeys = new Set(sections.map((section) => section.key));
     for (const [key, groupRows] of rowsByUnit) {
       if (knownKeys.has(key)) continue;
@@ -555,7 +593,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
     return sections
       .sort((left, right) => left.order - right.order || left.label.localeCompare(right.label, "vi"))
       .filter((section) => section.rows.length > 0 || showEmptyUnitGroups);
-  }, [filteredRows, showEmptyUnitGroups, units, viewMode]);
+  }, [filteredRows, showEmptyUnitGroups, unitFilter, units, viewMode]);
   const pagedUnitSections = useMemo(() => {
     if (viewMode !== "sheets") return [];
     const pageRowIds = new Set(pagedRows.map((row) => row.id));
@@ -577,14 +615,18 @@ export default function Dashboard({ username, role }: DashboardProps) {
     return <Fragment key={row.id}>
       <tr className={`data-row ${isExpanded ? "data-row-expanded" : ""}`} onClick={() => setExpandedRow(isExpanded ? null : row.id)}>
         <td className="col-expand"><CaretRight size={16} className={isExpanded ? "caret-open" : ""} /></td>
-        <td className="tax-code-cell"><div className="tax-code-with-action"><span>{row.tax_code}</span>{canWrite ? <><button className="row-update-button" type="button" title={refreshTitle} aria-label={refreshTitle} disabled={Boolean(updatingTaxCode) || isStartingManualLookup || Boolean(manualLookup) || isRefreshingAll} onClick={(event) => { event.stopPropagation(); void refreshTaxpayer(row); }}><ArrowsClockwise size={13} className={updatingTaxCode === row.tax_code ? "update-icon-spinning" : ""} /></button><button className="row-delete-button" type="button" title={`Xóa toàn bộ MST ${row.tax_code}`} aria-label={`Xóa toàn bộ MST ${row.tax_code}`} disabled={isDeleting || isRefreshingAll || Boolean(manualLookup)} onClick={(event) => { event.stopPropagation(); openDeleteDialog(row); }}><Trash size={13} /></button></> : null}</div></td>
+        <td className="tax-code-cell"><span>{row.tax_code}</span></td>
         <td><strong>{detail?.name ?? row.source_vendor_name ?? "Chưa có tên"}</strong>{sourceIsStale ? <small className="stale-source-label">Dữ liệu cũ</small> : null}<small>{detail?.address ?? ""}</small></td>
         <td><span className="sheet-label">{row.source_sheet}</span></td>
         <td><span className={statusClass(detail)}>{statusLabel(detail)}</span></td>
         <td className="date-cell">{formatDate(detail?.last_checked_at ?? null)}</td>
         <td className="note-cell">{formatSourceDate(detail?.source_updated_at ?? null)}</td>
+        <td className="actions-cell">{canWrite ? <div className="row-actions">
+          <button className="row-update-button" type="button" title={refreshTitle} aria-label={refreshTitle} disabled={Boolean(updatingTaxCode) || isStartingManualLookup || Boolean(manualLookup) || isRefreshingAll} onClick={(event) => { event.stopPropagation(); void refreshTaxpayer(row); }}><ArrowsClockwise size={13} className={updatingTaxCode === row.tax_code ? "update-icon-spinning" : ""} /></button>
+          <button className="row-delete-button" type="button" title={`Xóa toàn bộ MST ${row.tax_code}`} aria-label={`Xóa toàn bộ MST ${row.tax_code}`} disabled={isDeleting || isRefreshingAll || Boolean(manualLookup)} onClick={(event) => { event.stopPropagation(); openDeleteDialog(row); }}><Trash size={13} /></button>
+        </div> : null}</td>
       </tr>
-      {isExpanded ? <tr key={`${row.id}-detail`} className="detail-row"><td colSpan={7}><DetailPanel row={row} /></td></tr> : null}
+      {isExpanded ? <tr key={`${row.id}-detail`} className="detail-row"><td colSpan={8}><DetailPanel row={row} /></td></tr> : null}
     </Fragment>;
   }
 
@@ -1096,6 +1138,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
               <div className="toolbar-tools">
                 <form className="table-search" onSubmit={search}><MagnifyingGlass size={16} /><input ref={searchInputRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm MST hoặc tên..." aria-label="Tìm kiếm MST hoặc tên" /><button type="button" title="Xóa nội dung tìm kiếm" aria-label="Xóa nội dung tìm kiếm" disabled={!query} onClick={() => clearSearch()}><X size={15} /></button></form>
                 <select className="filter-select" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Lọc theo tình trạng"><option value="all">Tất cả</option><option value="active">Đang hoạt động</option><option value="inactive">Không hoạt động</option><option value="unknown">Chưa có dữ liệu</option><option value="error">Có lỗi</option></select>
+                <select className="filter-select unit-filter-select" value={unitFilter} onChange={(event) => setUnitFilter(event.target.value)} aria-label="Lọc theo đơn vị"><option value="all">Tất cả đơn vị</option>{unitFilterOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
               </div>
             </div>
 
@@ -1108,10 +1151,10 @@ export default function Dashboard({ username, role }: DashboardProps) {
             {error ? <div className="table-alert"><WarningCircle size={18} /> {error}</div> : null}
             <div className="table-scroll">
               <table className="data-table">
-                <thead><tr><th className="col-expand" /><th>Mã số thuế</th><th>Tên người nộp thuế</th><th>Năm</th><th>Tình trạng</th><th title="Lần hệ thống tra cứu endpoint gần nhất">Tra cứu lúc</th><th>Nguồn dữ liệu</th></tr></thead>
+                <thead><tr><th className="col-expand" /><th>Mã số thuế</th><th>Tên người nộp thuế</th><th>Năm</th><th>Tình trạng</th><th title="Lần hệ thống tra cứu endpoint gần nhất">Tra cứu lúc</th><th>Nguồn dữ liệu</th><th className="actions-header">Thao tác</th></tr></thead>
                 <tbody>
-                  {isLoading ? <TableSkeleton /> : filteredRows.length === 0 && !showEmptyUnitGroups ? <tr><td colSpan={7}><div className="table-empty"><FileText size={26} /><strong>Chưa có dữ liệu để hiển thị</strong><span>Dữ liệu sẽ xuất hiện sau khi migration và seed Supabase hoàn tất.</span></div></td></tr> : viewMode === "sheets" ? pagedUnitSections.map((section) => <Fragment key={`unit-${section.key}`}>
-                    <tr className="unit-group-row"><td colSpan={7}><strong>{section.label}</strong></td></tr>
+                  {isLoading ? <TableSkeleton /> : filteredRows.length === 0 && !showEmptyUnitGroups ? <tr><td colSpan={8}><div className="table-empty"><FileText size={26} /><strong>Chưa có dữ liệu để hiển thị</strong><span>Dữ liệu sẽ xuất hiện sau khi migration và seed Supabase hoàn tất.</span></div></td></tr> : viewMode === "sheets" ? pagedUnitSections.map((section) => <Fragment key={`unit-${section.key}`}>
+                    <tr className="unit-group-row"><td colSpan={8}><strong>{section.label}</strong></td></tr>
                     {section.rows.map(renderTaxpayerDataRow)}
                   </Fragment>) : pagedRows.map(renderTaxpayerDataRow)}
                 </tbody>
@@ -1406,5 +1449,5 @@ function EndpointSettingsPanel({ onRefreshAll, isRefreshingAll, refreshAllProgre
 }
 
 function TableSkeleton() {
-  return <>{[1, 2, 3, 4].map((row) => <tr className="skeleton-row" key={row}>{[1, 2, 3, 4, 5, 6, 7].map((cell) => <td key={cell}><span /></td>)}</tr>)}</>;
+  return <>{[1, 2, 3, 4].map((row) => <tr className="skeleton-row" key={row}>{[1, 2, 3, 4, 5, 6, 7, 8].map((cell) => <td key={cell}><span /></td>)}</tr>)}</>;
 }
