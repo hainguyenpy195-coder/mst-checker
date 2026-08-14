@@ -472,11 +472,8 @@ export default function Dashboard({ username, role }: DashboardProps) {
   const displayRows = useMemo(() => {
     if (viewMode !== "overview") return rows;
 
-    const sourceRows = unitFilter === "all"
-      ? rows
-      : rows.filter((row) => taxpayerUnitKey(row) === unitFilter);
     const uniqueRows = new Map<string, TaxpayerRow>();
-    for (const row of sourceRows) {
+    for (const row of rows) {
       const existing = uniqueRows.get(row.tax_code);
       if (!existing) {
         uniqueRows.set(row.tax_code, { ...row, source_sheet: row.source_year ?? row.source_sheet });
@@ -492,20 +489,20 @@ export default function Dashboard({ username, role }: DashboardProps) {
       if (!existing.source_note && row.source_note) existing.source_note = row.source_note;
     }
     return [...uniqueRows.values()];
-  }, [rows, unitFilter, viewMode]);
+  }, [rows, viewMode]);
 
   const unitFilterOptions = useMemo(() => {
+    if (viewMode !== "sheets") return [];
+
     const options = new Map<string, { value: string; label: string; order: number }>();
 
-    if (viewMode === "sheets") {
-      for (const unit of units) {
-        const value = taxpayerUnitRecordKey(unit);
-        options.set(value, {
-          value,
-          label: formatTaxpayerUnitHeading(unit.source_unit_key, unit.source_unit_label, unit.source_unit_order, unit.source_unit_marker),
-          order: unit.source_unit_order,
-        });
-      }
+    for (const unit of units) {
+      const value = taxpayerUnitRecordKey(unit);
+      options.set(value, {
+        value,
+        label: formatTaxpayerUnitHeading(unit.source_unit_key, unit.source_unit_label, unit.source_unit_order, unit.source_unit_marker),
+        order: unit.source_unit_order,
+      });
     }
 
     for (const row of rows) {
@@ -528,7 +525,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
       const matchesStatus = statusFilter === "all"
         || (statusFilter === "error" && Boolean(row.taxpayer?.last_error))
         || (row.taxpayer?.status_group ?? "unknown") === statusFilter;
-      const matchesUnit = unitFilter === "all" || taxpayerUnitKey(row) === unitFilter;
+      const matchesUnit = viewMode !== "sheets" || unitFilter === "all" || taxpayerUnitKey(row) === unitFilter;
       return matchesText && matchesStatus && matchesUnit;
     });
     return viewMode === "sheets" ? [...result].sort(compareTaxpayerRowsByUnit) : result;
@@ -1138,7 +1135,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
               <div className="toolbar-tools">
                 <form className="table-search" onSubmit={search}><MagnifyingGlass size={16} /><input ref={searchInputRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm MST hoặc tên..." aria-label="Tìm kiếm MST hoặc tên" /><button type="button" title="Xóa nội dung tìm kiếm" aria-label="Xóa nội dung tìm kiếm" disabled={!query} onClick={() => clearSearch()}><X size={15} /></button></form>
                 <select className="filter-select" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Lọc theo tình trạng"><option value="all">Tất cả</option><option value="active">Đang hoạt động</option><option value="inactive">Không hoạt động</option><option value="unknown">Chưa có dữ liệu</option><option value="error">Có lỗi</option></select>
-                <select className="filter-select unit-filter-select" value={unitFilter} onChange={(event) => setUnitFilter(event.target.value)} aria-label="Lọc theo đơn vị"><option value="all">Tất cả đơn vị</option>{unitFilterOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
+                {viewMode === "sheets" ? <select className="filter-select unit-filter-select" value={unitFilter} onChange={(event) => setUnitFilter(event.target.value)} aria-label="Lọc theo đơn vị"><option value="all">Tất cả đơn vị</option>{unitFilterOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : null}
               </div>
             </div>
 
