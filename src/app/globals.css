@@ -296,8 +296,13 @@ button:not(:disabled):active { transform: translateY(1px); }
 .taxpayer-import-template-link a { color: var(--accent-dark); font-weight: 700; text-decoration: underline; }
 .taxpayer-import-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 19px; }
 .taxpayer-import-summary-grid > div { display: grid; gap: 5px; min-height: 70px; padding: 12px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 12px; }
+.taxpayer-import-summary-grid > button { display: grid; gap: 5px; min-height: 70px; padding: 12px; color: inherit; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 12px; font: inherit; text-align: left; }
+.taxpayer-import-summary-card.is-clickable { cursor: pointer; transition: border-color 150ms ease, background 150ms ease; }
+.taxpayer-import-summary-card.is-clickable:hover { background: var(--surface-hover); border-color: var(--accent-border); }
+.taxpayer-import-summary-card:disabled { cursor: default; opacity: 1; }
 .taxpayer-import-summary-grid strong { color: var(--accent-dark); font-size: 21px; font-weight: 750; font-variant-numeric: tabular-nums; }
 .taxpayer-import-summary-grid span { color: var(--muted); font-size: 10px; line-height: 1.35; }
+.taxpayer-import-summary-card small { color: var(--accent-dark); font-size: 10px; text-decoration: underline; }
 .taxpayer-import-message, .taxpayer-import-warning { display: flex; align-items: flex-start; gap: 8px; margin-top: 15px; padding: 10px 12px; border-radius: var(--radius-control); font-size: 12px; line-height: 1.45; }
 .taxpayer-import-message { color: var(--success); background: var(--success-soft); border: 1px solid var(--success-border); }
 .taxpayer-import-warning { color: var(--warning); background: var(--warning-soft); border: 1px solid var(--warning-border); }
@@ -309,6 +314,14 @@ button:not(:disabled):active { transform: translateY(1px); }
 .taxpayer-import-candidate-row:last-child { border-bottom: 0; }
 .taxpayer-import-candidate-row:nth-child(even) { background: var(--surface-soft); }
 .taxpayer-import-candidate-list small { color: var(--muted); font-size: 10px; }
+.taxpayer-import-invalid-details { display: grid; gap: 8px; margin-top: 15px; padding: 12px; background: var(--surface-soft); border: 1px solid var(--warning-border); border-radius: var(--radius-control); }
+.taxpayer-import-invalid-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; color: var(--ink-soft); font-size: 12px; }
+.taxpayer-import-invalid-heading span, .taxpayer-import-invalid-details > small { color: var(--muted); font-size: 10px; }
+.taxpayer-import-invalid-scroll { max-height: 230px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+.taxpayer-import-invalid-row { display: grid; grid-template-columns: 170px 125px minmax(0, 1fr); gap: 10px; padding: 9px 11px; color: var(--ink-soft); border-bottom: 1px solid var(--line-soft); font-size: 11px; line-height: 1.4; }
+.taxpayer-import-invalid-row:last-child { border-bottom: 0; }
+.taxpayer-import-invalid-row:nth-child(even) { background: var(--surface); }
+.taxpayer-import-invalid-row > span:first-child { overflow-wrap: anywhere; }
 .taxpayer-import-progress { display: grid; justify-items: center; gap: 12px; margin-top: 27px; color: var(--accent-dark); text-align: center; }
 .taxpayer-import-progress strong { color: var(--ink); font-size: 15px; }
 .taxpayer-import-progress > span { max-width: 500px; color: var(--muted); font-size: 11px; line-height: 1.5; }
@@ -493,6 +506,8 @@ button:not(:disabled):active { transform: translateY(1px); }
   .taxpayer-import-summary-grid { grid-template-columns: 1fr 1fr; }
   .taxpayer-import-candidate-row { grid-template-columns: 105px minmax(0, 1fr); }
   .taxpayer-import-candidate-row > span:last-child { grid-column: 2; color: var(--muted); }
+  .taxpayer-import-invalid-row { grid-template-columns: 1fr 1fr; }
+  .taxpayer-import-invalid-row > span:last-child { grid-column: 1 / -1; }
   .invoice-intro { flex-direction: column; padding: 19px; }
   .invoice-quota { width: 100%; }
   .invoice-import-card { padding: 18px 16px; }

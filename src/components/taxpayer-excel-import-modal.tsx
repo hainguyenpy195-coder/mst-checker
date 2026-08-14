@@ -78,6 +78,7 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
   const [phase, setPhase] = useState<ImportPhase>("select");
   const [isReading, setIsReading] = useState(false);
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
+  const [showInvalidRows, setShowInvalidRows] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0, added: 0, updated: 0, failed: 0 });
   const [error, setError] = useState<string | null>(null);
   const [refreshErrors, setRefreshErrors] = useState<string[]>([]);
@@ -91,6 +92,7 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
     setFile(nextFile);
     setImportId(null);
     setPreview(null);
+    setShowInvalidRows(false);
     setError(nextFile && nextFile.size > TAXPAYER_IMPORT_STORAGE_MAX_BYTES ? "File excel phải dưới 20MB" : null);
     setRefreshErrors([]);
     setSummary(null);
@@ -285,17 +287,41 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
   }
 
   function renderPreviewStep() {
+    const invalidRows = preview?.invalidRows ?? [];
+    const invalidRowCount = counts?.invalidRows ?? invalidRows.length;
+
     return <>
       <div className="taxpayer-import-summary-grid">
         <div><strong>{formatCount(counts?.new ?? candidates.length)}</strong><span>MST chưa có trong CSDL</span></div>
         <div><strong>{formatCount(counts?.existing ?? 0)}</strong><span>MST đã tồn tại, bỏ qua</span></div>
         <div><strong>{formatCount(counts?.duplicateRows ?? 0)}</strong><span>Dòng trùng trong file</span></div>
-        <div><strong>{formatCount(counts?.invalidRows ?? 0)}</strong><span>Dòng không hợp lệ</span></div>
+        <button
+          className={`taxpayer-import-summary-card${invalidRows.length ? " is-clickable" : ""}`}
+          type="button"
+          disabled={!invalidRows.length}
+          aria-expanded={showInvalidRows}
+          onClick={() => setShowInvalidRows((current) => !current)}
+        >
+          <strong>{formatCount(invalidRowCount)}</strong>
+          <span>Dòng không hợp lệ</span>
+          {invalidRows.length ? <small>{showInvalidRows ? "Ẩn chi tiết" : "Xem chi tiết"}</small> : null}
+        </button>
       </div>
       <div className="taxpayer-import-message" role="status"><CheckCircle size={18} /> {preview?.message ?? `Phát hiện ${formatCount(candidates.length)} MST chưa có trong cơ sở dữ liệu.`}</div>
       {candidates.length ? <div className="taxpayer-import-candidate-list"><strong>Một số MST sẽ được thêm</strong><div className="taxpayer-import-candidate-scroll">{candidates.slice(0, 30).map((candidate) => <div className="taxpayer-import-candidate-row" key={candidate.taxCode}><span className="mono-value">{candidate.taxCode}</span><span>{[...new Set(candidate.sources.map((source) => source.sourceYear))].join(", ")}</span></div>)}</div>{candidates.length > 30 ? <small>Đang hiển thị 30/{formatCount(candidates.length)} MST.</small> : null}</div> : null}
       {preview?.ignoredSheets?.length ? <div className="taxpayer-import-warning"><WarningCircle size={16} /><span>Sheet bị bỏ qua: {preview.ignoredSheets.join("; ")}</span></div> : null}
-      {preview?.invalidRows?.length ? <div className="taxpayer-import-warning"><WarningCircle size={16} /><span>Đã bỏ qua {formatCount(counts?.invalidRows ?? preview.invalidRows.length)} dòng MST không hợp lệ.</span></div> : null}
+      {invalidRows.length ? <div className="taxpayer-import-warning"><WarningCircle size={16} /><span>Đã bỏ qua {formatCount(invalidRowCount)} dòng MST không hợp lệ. Bấm vào ô “Dòng không hợp lệ” để xem chi tiết.</span></div> : null}
+      {showInvalidRows && invalidRows.length ? <div className="taxpayer-import-invalid-details">
+        <div className="taxpayer-import-invalid-heading"><strong>Chi tiết dòng MST không hợp lệ</strong><span>Hiển thị tối đa 100 dòng đầu tiên</span></div>
+        <div className="taxpayer-import-invalid-scroll">
+          {invalidRows.map((invalidRow, index) => <div className="taxpayer-import-invalid-row" key={`${invalidRow.sourceSheet}-${invalidRow.sourceRow}-${index}`}>
+            <span><strong>{invalidRow.sourceSheet}</strong> · dòng {invalidRow.sourceRow}</span>
+            <span className="mono-value">{invalidRow.rawTaxCode || "(trống)"}</span>
+            <span>{invalidRow.message}</span>
+          </div>)}
+        </div>
+        {invalidRowCount > invalidRows.length ? <small>Đang hiển thị {formatCount(invalidRows.length)}/{formatCount(invalidRowCount)} dòng không hợp lệ.</small> : null}
+      </div> : null}
       {error ? <div className="confirm-error"><WarningCircle size={16} /> {error}</div> : null}
     </>;
   }
