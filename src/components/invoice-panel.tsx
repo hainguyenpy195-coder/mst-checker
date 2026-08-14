@@ -329,7 +329,7 @@ export default function InvoicePanel() {
       <div>
         <span className="invoice-eyebrow">HÓA ĐƠN ĐIỆN TỬ</span>
         <h2>Kiểm tra và đối chiếu hóa đơn</h2>
-        <p>Import PDF, XML hoặc hình ảnh để trích xuất thông tin. Mỗi số hóa đơn chỉ lưu một lần.</p>
+        <p>Import PDF, XML hoặc hình ảnh để trích xuất thông tin. Mỗi định danh hóa đơn (MST, mẫu số/ký hiệu và số hóa đơn) chỉ lưu một lần.</p>
       </div>
       <div className="invoice-quota">
         <span>Hạn mức quét tháng này</span>

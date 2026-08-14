@@ -53,6 +53,7 @@ export async function POST(request: Request) {
   if (buffer.length > maxBytes) {
     return NextResponse.json({ error: "File vượt quá giới hạn 4 MiB (4.194.304 bytes)." }, { status: 413 });
   }
+  const sourceFileSha256 = sha256Hex(buffer);
 
   const supabase = createAdminClient();
   const { data: quotaData, error: quotaError } = await supabase.rpc("consume_invoice_scan_quota", {
@@ -86,7 +87,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: message.includes("AI_GATEWAY_API_KEY") ? 503 : 502 });
   }
 
-  const extracted = normalizeExtractedInvoice(extractionResult.extraction);
+  const extracted = normalizeExtractedInvoice(extractionResult.extraction, sourceFileSha256);
   if (!extracted.invoice_number || !extracted.invoice_number_key) {
     return NextResponse.json({ error: "Không đọc được số hóa đơn. Vui lòng kiểm tra file rõ nét hơn rồi thử lại." }, { status: 422 });
   }
@@ -102,7 +103,7 @@ export async function POST(request: Request) {
   }
   if (existing) {
     return NextResponse.json({
-      error: "Hóa đơn đã tồn tại trong hệ thống.",
+      error: "Hóa đơn cùng định danh (MST, mẫu số/ký hiệu và số hóa đơn) đã tồn tại trong hệ thống.",
       invoiceExists: true,
       invoiceNumber: existing.invoice_number,
       usage: { used: quota.used, limit: quota.limit, remaining: Math.max(0, quota.limit - quota.used) },
@@ -117,7 +118,7 @@ export async function POST(request: Request) {
       source_file_name: fileName,
       source_file_mime_type: descriptor.mediaType,
       source_file_size: buffer.length,
-      source_file_sha256: sha256Hex(buffer),
+      source_file_sha256: sourceFileSha256,
       extracted_model: INVOICE_MODEL_ID,
       extracted_payload: {
         extraction: extractionResult.extraction,
@@ -131,7 +132,7 @@ export async function POST(request: Request) {
 
   if (insertError || !invoice) {
     if (insertError?.code === "23505") {
-      return NextResponse.json({ error: "Hóa đơn đã tồn tại trong hệ thống.", invoiceExists: true, invoiceNumber: extracted.invoice_number }, { status: 409 });
+      return NextResponse.json({ error: "Hóa đơn cùng định danh đã tồn tại trong hệ thống.", invoiceExists: true, invoiceNumber: extracted.invoice_number }, { status: 409 });
     }
     console.error("invoice insert failed", insertError);
     return NextResponse.json({ error: "Không thể lưu thông tin hóa đơn vào cơ sở dữ liệu." }, { status: 500 });

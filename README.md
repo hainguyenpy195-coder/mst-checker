@@ -36,6 +36,7 @@ Mở `http://localhost:3000`.
   - `supabase/migrations/202608130009_manual_gdt_lookup_sessions.sql`
   - `supabase/migrations/202608140001_invoices.sql`
   - `supabase/migrations/202608140002_invoice_provider_lookup.sql`
+  - `supabase/migrations/202608140003_invoice_identity_key.sql`
 3. Tạo seed cục bộ từ workbook:
 
    ```powershell
@@ -64,6 +65,8 @@ hạn, đồng thời không xoá các trường mà VietQR không cung cấp.
 Tab **Hóa đơn** nhận PDF, XML và hình ảnh tối đa 4 MiB mỗi file. AI Gateway dùng
 model `google/gemini-2.5-flash` để trích xuất thông tin, chống trùng theo số hóa
 đơn và giới hạn 200 lượt quét mỗi tháng qua `INVOICE_MONTHLY_SCAN_LIMIT`.
+Định danh trùng được tính theo MST người bán, mẫu số, ký hiệu và số hóa đơn;
+không dùng riêng số hóa đơn vì số có thể lặp giữa các nhà cung cấp hoặc series.
 Đối chiếu hóa đơn dùng địa chỉ và mã tra cứu được in trên từng hóa đơn. Modal
 điền sẵn hai thông tin này, mở trang tra cứu của đúng nhà cung cấp ở tab mới để
 người dùng hoàn thành loại CAPTCHA riêng của nhà cung cấp, sau đó chọn kết quả.

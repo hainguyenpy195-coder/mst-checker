@@ -142,6 +142,40 @@ export function normalizeInvoiceLookupCode(value: string | null | undefined) {
   return normalized ? normalized.replace(/\s+/g, "") : null;
 }
 
+export function buildInvoiceIdentityKey(options: {
+  invoiceNumber: string | null | undefined;
+  sellerTaxCode: string | null | undefined;
+  templateNumber: string | null | undefined;
+  symbol: string | null | undefined;
+  lookupUrl: string | null | undefined;
+  lookupCode: string | null | undefined;
+  fallbackKey?: string;
+}) {
+  const invoiceNumber = options.invoiceNumber ? normalizeInvoiceNumber(options.invoiceNumber) : null;
+  if (!invoiceNumber) return null;
+
+  const sellerTaxCode = options.sellerTaxCode ? normalizeTaxCode(options.sellerTaxCode) : null;
+  const templateNumber = cleanOptionalText(options.templateNumber)?.replace(/\s+/g, "").toLocaleUpperCase("vi-VN") ?? null;
+  const symbol = normalizeInvoiceSymbol(options.symbol)?.replace(/\s+/g, "").toLocaleUpperCase("vi-VN") ?? null;
+  const lookupUrl = normalizeInvoiceLookupUrl(options.lookupUrl);
+  const lookupCode = normalizeInvoiceLookupCode(options.lookupCode);
+
+  if (sellerTaxCode && (templateNumber || symbol)) {
+    return [
+      "seller:" + sellerTaxCode,
+      "template:" + (templateNumber ?? "unknown"),
+      "symbol:" + (symbol ?? "unknown"),
+      "number:" + invoiceNumber,
+    ].join("|");
+  }
+
+  if (lookupUrl && lookupCode) {
+    return ["provider:" + lookupUrl, "code:" + lookupCode, "number:" + invoiceNumber].join("|");
+  }
+
+  return ["file:" + (options.fallbackKey ?? "unknown"), "number:" + invoiceNumber].join("|");
+}
+
 export function normalizeInvoiceTemplateAndSymbol(templateNumber: string | null | undefined, symbol: string | null | undefined) {
   const storedTemplate = cleanOptionalText(templateNumber);
   const normalizedSymbol = normalizeInvoiceSymbol(symbol);
@@ -246,19 +280,29 @@ export async function extractInvoiceFromFile(options: {
   };
 }
 
-export function normalizeExtractedInvoice(extraction: InvoiceExtraction) {
+export function normalizeExtractedInvoice(extraction: InvoiceExtraction, fallbackIdentityKey?: string) {
   const invoiceNumber = cleanOptionalText(extraction.invoice_number);
   const sellerTaxCode = cleanOptionalText(extraction.seller_tax_code);
   const identity = normalizeInvoiceTemplateAndSymbol(extraction.invoice_template_number, extraction.invoice_symbol);
+  const lookupUrl = normalizeInvoiceLookupUrl(extraction.lookup_url);
+  const lookupCode = normalizeInvoiceLookupCode(extraction.lookup_code);
   return {
     invoice_number: invoiceNumber,
-    invoice_number_key: invoiceNumber ? normalizeInvoiceNumber(invoiceNumber) : null,
+    invoice_number_key: buildInvoiceIdentityKey({
+      invoiceNumber,
+      sellerTaxCode,
+      templateNumber: identity.templateNumber,
+      symbol: identity.symbol,
+      lookupUrl,
+      lookupCode,
+      fallbackKey: fallbackIdentityKey,
+    }),
     seller_tax_code: sellerTaxCode ? normalizeTaxCode(sellerTaxCode) : null,
     seller_name: cleanOptionalText(extraction.seller_name),
     invoice_template_number: identity.templateNumber,
     invoice_symbol: identity.symbol,
-    lookup_url: normalizeInvoiceLookupUrl(extraction.lookup_url),
-    lookup_code: normalizeInvoiceLookupCode(extraction.lookup_code),
+    lookup_url: lookupUrl,
+    lookup_code: lookupCode,
     invoice_date: cleanOptionalText(extraction.invoice_date),
     tax_amount: extraction.tax_amount,
     total_amount: extraction.total_amount,
