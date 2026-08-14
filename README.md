@@ -65,7 +65,8 @@ model `google/gemini-2.5-flash` để trích xuất thông tin, chống trùng t
 đơn và giới hạn 200 lượt quét mỗi tháng qua `INVOICE_MONTHLY_SCAN_LIMIT`.
 Đối chiếu Cục Thuế là luồng bán tự động: hệ thống chuẩn bị dữ liệu và CAPTCHA,
 người dùng nhập CAPTCHA thủ công, sau đó kết quả chỉ cập nhật đúng dòng hóa đơn
-đang được đối chiếu.
+đang được đối chiếu. Với hóa đơn điện tử không in riêng mẫu số, hệ thống suy ra
+mẫu số từ chữ số đầu tiên của ký hiệu, ví dụ `1K26DAB` tương ứng mẫu số `1`.
 
 ## Kiểm tra
 

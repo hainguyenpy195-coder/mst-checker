@@ -108,9 +108,25 @@ export function normalizeInvoiceNumber(value: string) {
   return value.normalize("NFKC").replace(/\s+/g, "").trim().toLocaleUpperCase("vi-VN");
 }
 
+function cleanOptionalText(value: string | null | undefined) {
+  const normalized = (value ?? "").normalize("NFKC").trim();
+  if (!normalized || /^(?:—|-|null|n\/a|na)$/i.test(normalized)) return null;
+  return normalized;
+}
+
 export function normalizeInvoiceSymbol(value: string | null) {
   const normalized = (value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
-  return normalized || null;
+  return cleanOptionalText(normalized);
+}
+
+/**
+ * For electronic invoices, the first digit of the six-character invoice
+ * symbol is the invoice template number. Example: 1K26DAB -> template 1.
+ * Some telecom invoices do not print a separate "Mẫu số" line.
+ */
+export function deriveInvoiceTemplateNumber(symbol: string | null | undefined) {
+  const normalized = (symbol ?? "").normalize("NFKC").replace(/\s+/g, "").trim();
+  return normalized.match(/^([1-9])/u)?.[1] ?? null;
 }
 
 export function parseInvoiceAmount(value: string | number | null | undefined): number | null {
@@ -149,6 +165,7 @@ function extractionPrompt(fileName: string, kind: InvoiceFileDescriptor["kind"])
     "Bạn là bộ phận kiểm tra hóa đơn điện tử tại Việt Nam.",
     "Đọc chính xác nội dung hóa đơn trong file đính kèm, không suy đoán và không tự điền dữ liệu không nhìn thấy.",
     "Trích xuất các trường: mã số thuế người bán, tên người bán, mẫu số, ký hiệu hóa đơn, số hóa đơn, ngày hóa đơn, tiền thuế, tổng tiền thanh toán, loại tiền tệ.",
+    "Theo quy tắc ký hiệu hóa đơn điện tử, ký tự số đầu tiên của ký hiệu là mẫu số. Ví dụ ký hiệu 1K26DAB thì mẫu số là 1, kể cả hóa đơn không in riêng dòng Mẫu số.",
     "Số hóa đơn phải giữ nguyên các số 0 ở đầu. Các khoản tiền trả về dạng số, không có dấu phân cách.",
     "extracted_text phải là phần text nhìn thấy trên hóa đơn, trình bày ngắn gọn nhưng đủ để kiểm tra lại.",
     "Nếu không thấy trường nào thì trả về null. Chỉ trả về dữ liệu theo schema structured output.",
@@ -189,18 +206,21 @@ export async function extractInvoiceFromFile(options: {
 }
 
 export function normalizeExtractedInvoice(extraction: InvoiceExtraction) {
-  const invoiceNumber = extraction.invoice_number?.trim() || null;
+  const invoiceNumber = cleanOptionalText(extraction.invoice_number);
+  const invoiceSymbol = normalizeInvoiceSymbol(extraction.invoice_symbol);
+  const sellerTaxCode = cleanOptionalText(extraction.seller_tax_code);
+  const invoiceTemplateNumber = cleanOptionalText(extraction.invoice_template_number) ?? deriveInvoiceTemplateNumber(invoiceSymbol);
   return {
     invoice_number: invoiceNumber,
     invoice_number_key: invoiceNumber ? normalizeInvoiceNumber(invoiceNumber) : null,
-    seller_tax_code: extraction.seller_tax_code ? normalizeTaxCode(extraction.seller_tax_code) : null,
-    seller_name: extraction.seller_name?.trim() || null,
-    invoice_template_number: extraction.invoice_template_number?.trim() || null,
-    invoice_symbol: normalizeInvoiceSymbol(extraction.invoice_symbol),
-    invoice_date: extraction.invoice_date?.trim() || null,
+    seller_tax_code: sellerTaxCode ? normalizeTaxCode(sellerTaxCode) : null,
+    seller_name: cleanOptionalText(extraction.seller_name),
+    invoice_template_number: invoiceTemplateNumber,
+    invoice_symbol: invoiceSymbol,
+    invoice_date: cleanOptionalText(extraction.invoice_date),
     tax_amount: extraction.tax_amount,
     total_amount: extraction.total_amount,
-    currency: extraction.currency?.trim() || null,
-    extracted_text: extraction.extracted_text?.trim() || null,
+    currency: cleanOptionalText(extraction.currency),
+    extracted_text: cleanOptionalText(extraction.extracted_text),
   };
 }

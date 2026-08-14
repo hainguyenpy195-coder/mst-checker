@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { authenticateRequest } from "@/lib/app-auth";
 import { INVOICE_SELECT } from "@/lib/invoice-db";
+import { deriveInvoiceTemplateNumber } from "@/lib/invoice-extraction";
 import { InvoiceGdtLookupError, createInvoiceGdtSession, refreshInvoiceGdtCaptcha, submitInvoiceGdtLookup, type InvoiceGdtFields } from "@/lib/invoice-gdt-lookup";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { InvoiceRecord } from "@/lib/invoice-types";
@@ -42,10 +43,14 @@ function readHiddenFields(value: unknown): Array<[string, string]> {
 }
 
 function toGdtFields(invoice: InvoiceForVerification): InvoiceGdtFields | null {
-  if (!invoice.seller_tax_code || !invoice.invoice_template_number || !invoice.invoice_symbol || !invoice.invoice_number) return null;
+  const storedTemplate = invoice.invoice_template_number?.trim();
+  const templateNumber = storedTemplate && !/^(?:—|-|null)$/i.test(storedTemplate)
+    ? storedTemplate
+    : deriveInvoiceTemplateNumber(invoice.invoice_symbol);
+  if (!invoice.seller_tax_code || !templateNumber || !invoice.invoice_symbol || !invoice.invoice_number) return null;
   return {
     sellerTaxCode: invoice.seller_tax_code,
-    templateNumber: invoice.invoice_template_number,
+    templateNumber,
     symbol: invoice.invoice_symbol,
     invoiceNumber: invoice.invoice_number,
   };
@@ -68,7 +73,15 @@ async function startVerification(username: string, invoiceId: string) {
 
   const fields = toGdtFields(invoice);
   if (!fields) {
-    return NextResponse.json({ error: "Hóa đơn thiếu MST, mẫu số, ký hiệu hoặc số hóa đơn nên chưa thể đối chiếu." }, { status: 422 });
+    return NextResponse.json({ error: "Hóa đơn thiếu MST, ký hiệu, số hóa đơn hoặc không xác định được mẫu số từ ký hiệu." }, { status: 422 });
+  }
+
+  if (invoice.invoice_template_number !== fields.templateNumber) {
+    const { error: templateUpdateError } = await supabase
+      .from("invoices")
+      .update({ invoice_template_number: fields.templateNumber })
+      .eq("id", invoice.id);
+    if (templateUpdateError) console.error("invoice template derivation update failed", templateUpdateError);
   }
 
   const gdtSession = await createInvoiceGdtSession();

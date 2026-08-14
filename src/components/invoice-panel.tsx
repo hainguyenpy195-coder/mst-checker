@@ -86,6 +86,12 @@ function formatFileSize(value: number) {
   return (value / (1024 * 1024)).toFixed(2) + " MB";
 }
 
+function effectiveTemplateNumber(invoice: Pick<InvoiceRecord, "invoice_template_number" | "invoice_symbol">) {
+  const stored = invoice.invoice_template_number?.trim();
+  if (stored && !/^(?:—|-|null)$/i.test(stored)) return stored;
+  return invoice.invoice_symbol?.trim().match(/^([1-9])/u)?.[1] ?? null;
+}
+
 function statusLabel(status: InvoiceVerificationStatus) {
   return statusMeta[status] ?? statusMeta.unverified;
 }
@@ -313,7 +319,7 @@ export default function InvoicePanel() {
       <div>
         <span className="invoice-eyebrow">HÓA ĐƠN ĐIỆN TỬ</span>
         <h2>Kiểm tra và đối chiếu hóa đơn</h2>
-        <p>Import PDF, XML hoặc hình ảnh để Gemini trích xuất thông tin. Mỗi số hóa đơn chỉ lưu một lần.</p>
+        <p>Import PDF, XML hoặc hình ảnh để trích xuất thông tin. Mỗi số hóa đơn chỉ lưu một lần.</p>
       </div>
       <div className="invoice-quota">
         <span>Hạn mức quét tháng này</span>
@@ -400,14 +406,15 @@ type InvoiceTableRowProps = {
 
 const InvoiceTableRow = memo(function InvoiceTableRow({ invoice, isBusy, onVerify }: InvoiceTableRowProps) {
   const status = statusLabel(invoice.verification_status);
-  const canVerify = Boolean(invoice.seller_tax_code && invoice.invoice_template_number && invoice.invoice_symbol && invoice.invoice_number);
+  const templateNumber = effectiveTemplateNumber(invoice);
+  const canVerify = Boolean(invoice.seller_tax_code && templateNumber && invoice.invoice_symbol && invoice.invoice_number);
   return <tr className="data-row invoice-data-row">
     <td className="invoice-number-cell">
-      <div className="invoice-number-action"><strong>{invoice.invoice_number}</strong><button className="invoice-verify-button" type="button" disabled={!canVerify || isBusy} title={canVerify ? "Đối chiếu với Cục Thuế" : "Thiếu MST, mẫu số hoặc ký hiệu"} onClick={() => onVerify(invoice)}><ShieldCheck size={15} /> {isBusy ? "Đang mở" : "Đối chiếu"}</button></div>
+      <div className="invoice-number-action"><strong>{invoice.invoice_number}</strong><button className="invoice-verify-button" type="button" disabled={!canVerify || isBusy} title={canVerify ? "Đối chiếu với Cục Thuế" : "Thiếu MST, ký hiệu, số hóa đơn hoặc không suy ra được mẫu số"} onClick={() => onVerify(invoice)}><ShieldCheck size={15} /> {isBusy ? "Đang mở" : "Đối chiếu"}</button></div>
       {invoice.verification_message ? <small title={invoice.verification_message}>{invoice.verification_message}</small> : null}
     </td>
     <td><strong>{invoice.seller_name ?? "Chưa có tên"}</strong><small className="mono-value">{invoice.seller_tax_code ?? "Chưa có MST"}</small></td>
-    <td><span>{invoice.invoice_symbol ?? "—"}</span><small>Mẫu {invoice.invoice_template_number ?? "—"}</small></td>
+    <td><span>{invoice.invoice_symbol ?? "—"}</span><small>Mẫu {templateNumber ?? "—"}{!invoice.invoice_template_number && templateNumber ? " · suy ra" : ""}</small></td>
     <td className="amount-cell">{formatAmount(invoice.tax_amount)}</td>
     <td className="amount-cell">{formatAmount(invoice.total_amount)}</td>
     <td><span className={status.className}>{status.label}</span></td>

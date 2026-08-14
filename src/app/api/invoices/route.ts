@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { authenticateRequest } from "@/lib/app-auth";
 import { INVOICE_SELECT, getVietnamMonthStart } from "@/lib/invoice-db";
+import { deriveInvoiceTemplateNumber } from "@/lib/invoice-extraction";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { InvoiceVerificationStatus } from "@/lib/invoice-types";
+import type { InvoiceRecord, InvoiceVerificationStatus } from "@/lib/invoice-types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -59,8 +60,14 @@ export async function GET(request: Request) {
   const used = usageResult.data?.scan_count ?? 0;
   const limit = usageResult.data?.monthly_limit ?? Number(process.env.INVOICE_MONTHLY_SCAN_LIMIT ?? 200);
   const total = invoiceResult.count ?? 0;
+  const rows = ((invoiceResult.data ?? []) as unknown as InvoiceRecord[]).map((row) => {
+    const derivedTemplate = deriveInvoiceTemplateNumber(row.invoice_symbol);
+    return !row.invoice_template_number && derivedTemplate
+      ? { ...row, invoice_template_number: derivedTemplate }
+      : row;
+  });
   return NextResponse.json({
-    rows: invoiceResult.data ?? [],
+    rows,
     total,
     page,
     pageSize: PAGE_SIZE,
