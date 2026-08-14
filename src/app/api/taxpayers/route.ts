@@ -35,30 +35,40 @@ export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   const requestedYear = normalizeYear(requestUrl.searchParams.get("year") ?? requestUrl.searchParams.get("sheet") ?? "all");
   const year = requestedYear === "all" ? "all" : requestedYear;
-  const limit = Math.min(Math.max(Number(requestUrl.searchParams.get("limit") ?? 5000), 1), 5000);
+  const offsetValue = Number(requestUrl.searchParams.get("offset") ?? 0);
+  const batchSizeValue = Number(requestUrl.searchParams.get("batchSize") ?? requestUrl.searchParams.get("limit") ?? 1000);
+  const offset = Number.isInteger(offsetValue) && offsetValue >= 0 ? offsetValue : 0;
+  const batchSize = Number.isInteger(batchSizeValue)
+    ? Math.min(Math.max(batchSizeValue, 1), 1000)
+    : 1000;
+  const includeYears = offset === 0 && requestUrl.searchParams.get("includeYears") !== "false";
 
   if (year !== "all" && !YEAR_PATTERN.test(year)) {
     return NextResponse.json({ error: "Năm không hợp lệ." }, { status: 400 });
   }
 
   const supabase = createAdminClient();
-  const [allYearRowsResult, sourceResult] = await Promise.all([
-    readAllPages((from, to) => supabase
+  const sourceQuery = (() => {
+    let query = supabase
       .from("taxpayer_sources")
-      .select("source_year")
-      .not("source_year", "is", null)
-      .range(from, to), 10000),
-    readAllPages((from, to) => {
-      let query = supabase
+      .select("id, tax_code, source_sheet, source_year, source_row, source_vendor_name, source_note")
+      .order("source_year", { ascending: true })
+      .order("source_row", { ascending: true })
+      .order("id", { ascending: true })
+      .range(offset, offset + batchSize - 1);
+    if (year !== "all") query = query.eq("source_year", year);
+    return query;
+  })();
+
+  const allYearRowsPromise = includeYears
+    ? readAllPages((from, to) => supabase
         .from("taxpayer_sources")
-        .select("id, tax_code, source_sheet, source_year, source_row, source_vendor_name, source_note")
-        .order("source_year", { ascending: true })
-        .order("source_row", { ascending: true })
-        .range(from, to);
-      if (year !== "all") query = query.eq("source_year", year);
-      return query;
-    }, limit),
-  ]);
+        .select("source_year")
+        .not("source_year", "is", null)
+        .range(from, to), 10000)
+    : Promise.resolve({ data: [], error: null });
+
+  const [allYearRowsResult, sourceResult] = await Promise.all([allYearRowsPromise, sourceQuery]);
 
   if (allYearRowsResult.error || sourceResult.error) {
     console.error("taxpayer source query failed", allYearRowsResult.error ?? sourceResult.error);
@@ -88,7 +98,9 @@ export async function GET(request: Request) {
 
   return NextResponse.json({
     rows,
-    years,
+    years: includeYears ? years : undefined,
+    hasMore: sourceRows.length === batchSize,
+    nextOffset: offset + sourceRows.length,
   });
 }
 

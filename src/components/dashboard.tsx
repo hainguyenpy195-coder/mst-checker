@@ -30,6 +30,8 @@ import TaxpayerExcelImportModal from "@/components/taxpayer-excel-import-modal";
 const DEFAULT_YEARS = ["2023", "2024", "2025", "2026"];
 const DEFAULT_YEAR = DEFAULT_YEARS[DEFAULT_YEARS.length - 1] ?? "2026";
 const PAGE_SIZE = 100;
+const TAXPAYER_BATCH_SIZE = 1000;
+const TAXPAYER_BATCH_RETRY_LIMIT = 3;
 const MANUAL_REFRESH_INTERVAL_MS = 60_000;
 const MAX_CAPTCHA_FAILURES_BEFORE_REFRESH = 5;
 type ViewMode = DashboardView;
@@ -62,6 +64,14 @@ type TaxpayerRow = {
   source_vendor_name: string | null;
   source_note: string | null;
   taxpayer: TaxpayerDetail | null;
+};
+
+type TaxpayerBatchResponse = {
+  rows?: TaxpayerRow[];
+  years?: string[];
+  hasMore?: boolean;
+  nextOffset?: number;
+  error?: string;
 };
 
 type DeleteTarget = { taxCode: string; name: string | null };
@@ -99,6 +109,37 @@ type TaxCodePreviewResponse = {
 };
 
 type DashboardProps = { username: string; role: AppRole };
+
+function waitForTaxpayerBatchRetry(delayMs: number, signal: AbortSignal) {
+  return new Promise<void>((resolve) => {
+    const timeout = window.setTimeout(resolve, delayMs);
+    signal.addEventListener("abort", () => {
+      window.clearTimeout(timeout);
+      resolve();
+    }, { once: true });
+  });
+}
+
+async function fetchTaxpayerBatch(url: string, signal: AbortSignal) {
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < TAXPAYER_BATCH_RETRY_LIMIT; attempt += 1) {
+    try {
+      const response = await fetch(url, { cache: "no-store", signal });
+      const payload = await response.json() as TaxpayerBatchResponse;
+      if (!response.ok) throw new Error(payload.error ?? "Không thể tải danh sách MST.");
+      return payload;
+    } catch (requestError) {
+      if (signal.aborted) throw requestError;
+      lastError = requestError;
+      if (attempt < TAXPAYER_BATCH_RETRY_LIMIT - 1) {
+        await waitForTaxpayerBatchRetry(300 * 2 ** attempt, signal);
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Không thể tải danh sách MST.");
+}
 
 function AttechLogo({ compact = false }: { compact?: boolean }) {
   return (
@@ -244,6 +285,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
   const taxCodeLookupRequest = useRef<{ taxCode: string; promise: Promise<TaxCodeLookupResult> } | null>(null);
   const refreshAllLock = useRef(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const dataLoadController = useRef<AbortController | null>(null);
 
   const activeYear = viewMode === "sheets" ? selectedYear : viewMode === "overview" ? "all" : null;
   const latestYear = getLatestYear(years);
@@ -280,26 +322,59 @@ export default function Dashboard({ username, role }: DashboardProps) {
 
   async function loadData() {
     if (!activeYear) return;
+
+    dataLoadController.current?.abort();
+    const controller = new AbortController();
+    dataLoadController.current = controller;
     setIsLoading(true);
     setError(null);
+    setRows([]);
+
+    const loadedRows: TaxpayerRow[] = [];
+    let loadedYears: string[] | null = null;
+    let offset = 0;
+
     try {
-      const response = await fetch(`/api/taxpayers?year=${encodeURIComponent(activeYear)}&limit=5000`, { cache: "no-store" });
-      const payload = await response.json() as { rows?: TaxpayerRow[]; years?: string[]; error?: string };
-      if (!response.ok) throw new Error(payload.error ?? "Không thể tải danh sách.");
-      setRows(payload.rows ?? []);
-      if (payload.years?.length) {
-        setYears(payload.years);
-        if (viewMode === "sheets" && !payload.years.includes(selectedYear)) {
-          const fallbackYear = getLatestYear(payload.years);
+      while (true) {
+        const params = new URLSearchParams({
+          year: activeYear,
+          offset: String(offset),
+          batchSize: String(TAXPAYER_BATCH_SIZE),
+        });
+        if (offset === 0) params.set("includeYears", "true");
+
+        const payload = await fetchTaxpayerBatch(`/api/taxpayers?${params.toString()}`, controller.signal);
+        const batchRows = payload.rows ?? [];
+        loadedRows.push(...batchRows);
+        if (payload.years?.length) loadedYears = payload.years;
+
+        if (!payload.hasMore || batchRows.length === 0) break;
+
+        const nextOffset = payload.nextOffset ?? offset + batchRows.length;
+        if (nextOffset <= offset) throw new Error("Danh sách MST trả về con trỏ lô không hợp lệ.");
+        offset = nextOffset;
+      }
+
+      if (controller.signal.aborted) return;
+
+      setRows(loadedRows);
+      if (loadedYears?.length) {
+        setYears(loadedYears);
+        if (viewMode === "sheets" && !loadedYears.includes(selectedYear)) {
+          const fallbackYear = getLatestYear(loadedYears);
           setSelectedYear(fallbackYear);
           router.replace(getDashboardHref("sheets", fallbackYear), { scroll: false });
         }
       }
     } catch (loadError) {
+      if (controller.signal.aborted) return;
       setError(loadError instanceof Error ? loadError.message : "Không thể tải danh sách.");
       setRows([]);
     } finally {
-      setIsLoading(false);
+      if (dataLoadController.current === controller) {
+        dataLoadController.current = null;
+        setIsLoading(false);
+      }
     }
   }
 
@@ -327,6 +402,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
   useEffect(() => {
     if (viewMode === "activity") void loadActivity();
     else if (viewMode !== "settings") void loadData();
+    return () => dataLoadController.current?.abort();
     // The active year is the intended refresh boundary for this dashboard.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeYear, viewMode]);
