@@ -10,7 +10,6 @@ import {
   DownloadSimple,
   FileText,
   Gear,
-  IdentificationCard,
   MagnifyingGlass,
   Plus,
   Receipt,
@@ -143,9 +142,18 @@ async function fetchTaxpayerBatch(url: string, signal: AbortSignal) {
 
 function AttechLogo({ compact = false }: { compact?: boolean }) {
   return (
-    <div className={`attech-logo ${compact ? "attech-logo-compact" : ""}`} aria-label="ATTECH">
-      <span className="attech-a">A</span><span className="attech-tech">TTECH</span>
+    <div className={`attech-logo ${compact ? "attech-logo-compact" : ""}`} role="img" aria-label="ATTECH - Trung tâm Bảo đảm Kỹ thuật">
+      <span className="attech-wordmark"><span className="attech-a">A</span><span className="attech-tech">TTECH</span></span>
+      <span className="attech-unit-name">Trung tâm Bảo đảm Kỹ thuật</span>
     </div>
+  );
+}
+
+function TaxIdAppIcon() {
+  return (
+    <span className="header-app-icon" aria-hidden="true">
+      <img src="/app-icon.png" alt="" width={38} height={38} />
+    </span>
   );
 }
 
@@ -465,6 +473,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
   }, [filteredRows, safePage]);
   const pageStart = filteredRows.length ? (safePage - 1) * PAGE_SIZE + 1 : 0;
   const pageEnd = Math.min(safePage * PAGE_SIZE, filteredRows.length);
+  const pageVisibleCount = filteredRows.length ? pageEnd - pageStart + 1 : 0;
 
   async function search(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -912,7 +921,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
       <div className="dashboard-main">
         <header className="dashboard-topbar">
           <div className="header-app-identity">
-            <span className="header-app-icon" aria-hidden="true"><IdentificationCard size={20} weight="duotone" /></span>
+            <TaxIdAppIcon />
             <div>
               <strong>TAX ID Checker</strong>
               <span>Kiểm tra tình trạng mã số thuế nhà cung ứng tiềm năng</span>
@@ -970,7 +979,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
           />
           <section className="table-section desktop-data-table">
             <div className="table-toolbar">
-              <div><h2>{viewMode === "overview" ? "Bản ghi tổng hợp" : `MST trong năm ${selectedYear}`}</h2><span>{filteredRows.length ? `Hiển thị ${pageStart}-${pageEnd} / ${filteredRows.length} dòng` : "0 dòng đang hiển thị"}</span></div>
+              <div><h2>{viewMode === "overview" ? "Tổng hợp mã số thuế nhà cung ứng" : `MST trong năm ${selectedYear}`}</h2><span>{pageVisibleCount ? `Hiển thị ${pageVisibleCount}/${filteredRows.length} nhà cung ứng` : "0 nhà cung ứng đang hiển thị"}</span></div>
               <div className="toolbar-tools">
                 <form className="table-search" onSubmit={search}><MagnifyingGlass size={16} /><input ref={searchInputRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm MST hoặc tên..." aria-label="Tìm kiếm MST hoặc tên" /><button type="button" title="Xóa nội dung tìm kiếm" aria-label="Xóa nội dung tìm kiếm" disabled={!query} onClick={() => clearSearch()}><X size={15} /></button></form>
                 <select className="filter-select" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Lọc theo tình trạng"><option value="all">Tất cả</option><option value="active">Đang hoạt động</option><option value="inactive">Không hoạt động</option><option value="unknown">Chưa có dữ liệu</option><option value="error">Có lỗi</option></select>

@@ -3,7 +3,7 @@
 import { FormEvent, useState } from "react";
 
 function AttechLogo() {
-  return <div className="attech-logo attech-logo-login"><span className="attech-a">A</span><span className="attech-tech">TTECH</span></div>;
+  return <div className="attech-logo attech-logo-login" role="img" aria-label="ATTECH - Trung tâm Bảo đảm Kỹ thuật"><span className="attech-wordmark"><span className="attech-a">A</span><span className="attech-tech">TTECH</span></span><span className="attech-unit-name">Trung tâm Bảo đảm Kỹ thuật</span></div>;
 }
 
 export default function LoginPage() {
