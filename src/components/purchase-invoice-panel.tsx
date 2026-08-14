@@ -321,7 +321,7 @@ export default function PurchaseInvoicePanel({ role }: { role: AppRole }) {
       <div className="table-toolbar">
         <div><h2>Danh sách hóa đơn mua vào</h2><span>{pageLabel}</span></div>
         <div className="toolbar-tools purchase-toolbar-tools">
-          <label className="table-search"><MagnifyingGlass size={16} /><input value={query} onChange={(event) => updateQuery(event.target.value)} placeholder="Tìm số HĐ, nhà cung cấp, MST..." aria-label="Tìm hóa đơn mua vào" /><button type="button" title="Xóa tìm kiếm" aria-label="Xóa tìm kiếm" disabled={!query} onClick={() => updateQuery("")}><X size={15} /></button></label>
+          <label className="table-search"><MagnifyingGlass size={16} /><input value={query} onChange={(event) => updateQuery(event.target.value)} placeholder="Tìm số HĐ, NCC, MST, HHDV..." aria-label="Tìm hóa đơn, nhà cung cấp, mã số thuế hoặc hàng hóa dịch vụ" /><button type="button" title="Xóa tìm kiếm" aria-label="Xóa tìm kiếm" disabled={!query} onClick={() => updateQuery("")}><X size={15} /></button></label>
           <div className="purchase-date-range" role="group" aria-label="Lọc theo ngày phát hành hóa đơn">
             <VietnameseDatePicker label="Từ ngày" value={dateFrom} max={dateTo || undefined} onChange={updateDateFrom} />
             <VietnameseDatePicker label="Đến ngày" value={dateTo} min={dateFrom || undefined} onChange={updateDateTo} />

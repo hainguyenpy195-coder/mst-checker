@@ -105,7 +105,9 @@ export async function GET(request: Request) {
       "invoice_number.ilike.%" + queryText + "%"
         + ",seller_name.ilike.%" + queryText + "%"
         + ",seller_tax_code.ilike.%" + queryText + "%"
-        + ",invoice_symbol.ilike.%" + queryText + "%",
+        + ",invoice_symbol.ilike.%" + queryText + "%"
+        + ",goods_services.ilike.%" + queryText + "%"
+        + ",description.ilike.%" + queryText + "%",
     );
   }
   if (dateFromResult.value) purchaseQuery = purchaseQuery.gte("invoice_issue_date", dateFromResult.value);
