@@ -43,7 +43,7 @@ export async function POST(request: Request) {
 
   const maxBytes = getInvoiceMaxUploadBytes();
   if (fileValue.size > maxBytes) {
-    return NextResponse.json({ error: "File vượt quá giới hạn 4 MiB (4.194.304 bytes)." }, { status: 413 });
+    return NextResponse.json({ error: "File vượt quá giới hạn 4 MB (4.194.304 bytes)." }, { status: 413 });
   }
 
   const descriptor = resolveInvoiceFileDescriptor(fileValue.name, fileValue.type);
@@ -53,7 +53,7 @@ export async function POST(request: Request) {
 
   const buffer = Buffer.from(await fileValue.arrayBuffer());
   if (buffer.length > maxBytes) {
-    return NextResponse.json({ error: "File vượt quá giới hạn 4 MiB (4.194.304 bytes)." }, { status: 413 });
+    return NextResponse.json({ error: "File vượt quá giới hạn 4 MB (4.194.304 bytes)." }, { status: 413 });
   }
   const sourceFileSha256 = sha256Hex(buffer);
 

@@ -62,7 +62,7 @@ vào STT, tên, MST, tình trạng, hai thời điểm tra cứu và ghi chú. X
 nguồn chính; VietQR được dùng làm nguồn phụ khi XInvoice tạm lỗi hoặc bị giới
 hạn, đồng thời không xoá các trường mà VietQR không cung cấp.
 
-Tab **Hóa đơn** nhận PDF, XML và hình ảnh tối đa 4 MiB mỗi file. AI Gateway dùng
+Tab **Hóa đơn** nhận PDF, XML và hình ảnh tối đa 4 MB mỗi file. AI Gateway dùng
 model `google/gemini-2.5-flash` để trích xuất thông tin, chống trùng theo số hóa
 đơn và giới hạn 200 lượt quét mỗi tháng qua `INVOICE_MONTHLY_SCAN_LIMIT`.
 Định danh trùng được tính theo MST người bán, mẫu số, ký hiệu và số hóa đơn;

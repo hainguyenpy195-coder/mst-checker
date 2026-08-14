@@ -257,7 +257,7 @@ export default function InvoicePanel({ role }: { role: AppRole }) {
     if (!file) return;
     if (file.size > MAX_UPLOAD_BYTES) {
       setSelectedFile(null);
-      setError("File vượt quá giới hạn 4 MiB (4.194.304 bytes).");
+      setError("File vượt quá giới hạn 4 MB (4.194.304 bytes).");
       return;
     }
     setError(null);
@@ -448,7 +448,7 @@ export default function InvoicePanel({ role }: { role: AppRole }) {
 
     <section className="invoice-import-card">
       <div className="invoice-import-heading">
-        <div><strong>Import hóa đơn</strong><span>Giới hạn mỗi file: 4 MiB · Định dạng: PDF, XML, JPG/JPEG, PNG, WEBP, GIF</span></div>
+        <div><strong>Import hóa đơn</strong><span>Giới hạn mỗi file: 4 MB · Định dạng: PDF, XML, JPG/JPEG, PNG, WEBP, GIF</span></div>
         <Receipt size={24} weight="duotone" />
       </div>
       <button
