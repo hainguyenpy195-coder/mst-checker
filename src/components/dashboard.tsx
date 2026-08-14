@@ -13,6 +13,7 @@ import {
   IdentificationCard,
   MagnifyingGlass,
   Plus,
+  Receipt,
   SignOut,
   SquaresFour,
   Table,
@@ -22,6 +23,7 @@ import {
 } from "@phosphor-icons/react";
 import { getDashboardHref, getDashboardViewFromPathname, type DashboardView } from "@/lib/dashboard-routes";
 import { isValidTaxCode, normalizeTaxCode, TAX_CODE_FORMAT_HINT, TAX_CODE_INPUT_PATTERN } from "@/lib/tax-code";
+import InvoicePanel from "@/components/invoice-panel";
 
 const DEFAULT_YEARS = ["2023", "2024", "2025", "2026"];
 const DEFAULT_YEAR = DEFAULT_YEARS[DEFAULT_YEARS.length - 1] ?? "2026";
@@ -221,7 +223,7 @@ export default function Dashboard({ username }: DashboardProps) {
 
   function navigateToView(nextView: ViewMode, year?: string) {
     setError(null);
-    if (nextView === "activity" || nextView === "settings") closeAddForm();
+    if (nextView === "activity" || nextView === "invoices" || nextView === "settings") closeAddForm();
 
     const href = getDashboardHref(nextView, nextView === "sheets" ? year ?? latestYear : undefined);
     const currentQuery = searchParams.toString();
@@ -755,6 +757,7 @@ export default function Dashboard({ username }: DashboardProps) {
   const navItems = [
     { label: "Tổng hợp", icon: SquaresFour, mode: "overview" as ViewMode },
     { label: "Theo năm", icon: Table, mode: "sheets" as ViewMode },
+    { label: "Hóa đơn", icon: Receipt, mode: "invoices" as ViewMode },
     { label: "Lịch sử", icon: ClockCounterClockwise, mode: "activity" as ViewMode },
   ];
   return (
@@ -803,7 +806,7 @@ export default function Dashboard({ username }: DashboardProps) {
         <main className="dashboard-content">
           <div className={`page-heading-row ${isDataView ? "desktop-page-heading" : ""}`}>
             <div>
-              <h1>{viewMode === "overview" ? "Bảng tổng hợp" : viewMode === "sheets" ? `Danh sách MST năm ${selectedYear}` : viewMode === "activity" ? "Lịch sử thao tác" : "Cấu hình"}</h1>
+              <h1>{viewMode === "overview" ? "Bảng tổng hợp" : viewMode === "sheets" ? "Danh sách MST năm " + selectedYear : viewMode === "invoices" ? "Hóa đơn" : viewMode === "activity" ? "Lịch sử thao tác" : "Cấu hình"}</h1>
             </div>
             {viewMode === "overview" || viewMode === "sheets" ? <div className="heading-actions">
               <button className="outline-button" type="button" onClick={toggleAddForm} disabled={isRefreshingAll}><Plus size={17} /> Thêm MST</button>
@@ -818,6 +821,8 @@ export default function Dashboard({ username }: DashboardProps) {
           {viewMode === "settings" ? <EndpointSettingsPanel onRefreshAll={() => void refreshAllTaxpayers()} isRefreshingAll={isRefreshingAll} refreshAllProgress={refreshAllProgress} /> : null}
 
           {viewMode === "activity" ? <ActivityPanel rows={activityRows} isLoading={isActivityLoading} error={activityError} /> : null}
+
+          {viewMode === "invoices" ? <InvoicePanel /> : null}
 
           {isDataView ? <>
           <MobileLookupPanel

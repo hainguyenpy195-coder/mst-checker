@@ -1,4 +1,4 @@
-export const DASHBOARD_VIEWS = ["overview", "sheets", "activity", "settings"] as const;
+export const DASHBOARD_VIEWS = ["overview", "sheets", "activity", "invoices", "settings"] as const;
 
 export type DashboardView = (typeof DASHBOARD_VIEWS)[number];
 

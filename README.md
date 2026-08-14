@@ -14,6 +14,7 @@ Dữ liệu thật được nạp trực tiếp vào project Supabase riêng b�
 Copy-Item .env.example .env.local
 # Điền SUPABASE_URL, SUPABASE_SECRET_KEY,
 # APP_LOGIN_USERNAME, APP_LOGIN_PASSWORD và APP_SESSION_SECRET
+# AI_GATEWAY_API_KEY dùng cho trích xuất hóa đơn
 npm install
 npm run dev
 ```
@@ -33,6 +34,7 @@ Mở `http://localhost:3000`.
   - `supabase/migrations/202608130007_taxpayer_activity_logs.sql`
   - `supabase/migrations/202608130008_manual_refresh_only.sql`
   - `supabase/migrations/202608130009_manual_gdt_lookup_sessions.sql`
+  - `supabase/migrations/202608140001_invoices.sql`
 3. Tạo seed cục bộ từ workbook:
 
    ```powershell
@@ -57,6 +59,13 @@ Cột D `Mặt hàng` được giữ là cột vật lý trống và ẩn; dữ 
 vào STT, tên, MST, tình trạng, hai thời điểm tra cứu và ghi chú. XInvoice là
 nguồn chính; VietQR được dùng làm nguồn phụ khi XInvoice tạm lỗi hoặc bị giới
 hạn, đồng thời không xoá các trường mà VietQR không cung cấp.
+
+Tab **Hóa đơn** nhận PDF, XML và hình ảnh tối đa 4 MiB mỗi file. AI Gateway dùng
+model `google/gemini-3.5-flash` để trích xuất thông tin, chống trùng theo số hóa
+đơn và giới hạn 200 lượt quét mỗi tháng qua `INVOICE_MONTHLY_SCAN_LIMIT`.
+Đối chiếu Cục Thuế là luồng bán tự động: hệ thống chuẩn bị dữ liệu và CAPTCHA,
+người dùng nhập CAPTCHA thủ công, sau đó kết quả chỉ cập nhật đúng dòng hóa đơn
+đang được đối chiếu.
 
 ## Kiểm tra
 
