@@ -142,9 +142,6 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
       setImportId(payload.importId ?? createdImportId);
       setPreview(payload);
       setPhase("preview");
-      if (!(payload.candidates?.length ?? 0)) {
-        await completeImport(createdImportId, 0, 0, 0);
-      }
     } catch (previewError) {
       if (createdImportId) {
         void fetch(`/api/taxpayers/import/upload?importId=${encodeURIComponent(createdImportId)}`, { method: "DELETE", cache: "no-store" });
