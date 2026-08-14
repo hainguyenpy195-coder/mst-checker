@@ -8,6 +8,7 @@ import {
   getTaxpayerImportSession,
   isTaxpayerImportId,
   readStoredCandidates,
+  readStoredSourceUnits,
 } from "@/lib/taxpayer-import";
 
 export const runtime = "nodejs";
@@ -133,6 +134,7 @@ export async function POST(request: Request) {
 
   const parsed = parseCandidates(candidates.slice(offset, offset + MAX_COMMIT_BATCH_SIZE));
   if (!parsed.candidates) return NextResponse.json({ error: parsed.error }, { status: 400 });
+  const sourceUnits = readStoredSourceUnits(importSession.source_units);
 
   const taxCodes = parsed.candidates.map((candidate) => candidate.taxCode);
   const existingResult = await readInCodeBatches(taxCodes, (batch) => supabase
@@ -173,6 +175,22 @@ export async function POST(request: Request) {
       .map((row) => (row && typeof row === "object" ? (row as { tax_code?: unknown }).tax_code : null))
       .filter((taxCode): taxCode is string => typeof taxCode === "string");
     sourceCount = parsed.candidates.reduce((count, candidate) => count + candidate.sources.length, 0);
+  }
+
+  if (offset === 0 && sourceUnits.length) {
+    const { error: sourceUnitsError } = await supabase
+      .from("taxpayer_source_units")
+      .upsert(sourceUnits.map((unit) => ({
+        source_year: unit.sourceYear,
+        source_unit_key: unit.unitKey,
+        source_unit_label: unit.unitLabel,
+        source_unit_order: unit.unitOrder,
+        updated_at: new Date().toISOString(),
+      })), { onConflict: "source_year,source_unit_key" });
+    if (sourceUnitsError) {
+      console.error("taxpayer Excel source units save failed", sourceUnitsError);
+      return NextResponse.json({ error: "Không thể lưu danh sách đơn vị từ file Excel." }, { status: 500 });
+    }
   }
 
   const storedAddedTaxCodes = Array.isArray(importSession.added_tax_codes)

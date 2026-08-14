@@ -157,6 +157,18 @@ Giữ quan hệ giữa MST và dữ liệu Excel nguồn.
 - `source_note text`
 - Ràng buộc duy nhất để tránh nhập trùng khi chạy lại seed.
 
+### `taxpayer_source_units`
+
+Giữ tiêu đề các đơn vị trong workbook theo từng năm, kể cả đơn vị không có
+MST. Bảng này giúp menu theo năm và file Excel xuất ra giữ đúng các dòng nhóm
+trống như file nguồn.
+
+- `source_year text`
+- `source_unit_key text`
+- `source_unit_label text`
+- `source_unit_order integer`
+- Khóa chính ghép `(source_year, source_unit_key)`.
+
 ### `taxpayer_status_history`
 
 Chỉ thêm bản ghi khi trạng thái thay đổi đáng kể.

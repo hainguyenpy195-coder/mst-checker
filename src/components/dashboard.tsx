@@ -69,9 +69,17 @@ type TaxpayerRow = {
   taxpayer: TaxpayerDetail | null;
 };
 
+type TaxpayerUnitRow = {
+  source_year: string;
+  source_unit_key: string;
+  source_unit_label: string;
+  source_unit_order: number;
+};
+
 type TaxpayerBatchResponse = {
   rows?: TaxpayerRow[];
   years?: string[];
+  units?: TaxpayerUnitRow[];
   hasMore?: boolean;
   nextOffset?: number;
   error?: string;
@@ -129,6 +137,10 @@ function compareTaxpayerRowsByUnit(left: TaxpayerRow, right: TaxpayerRow) {
   const labelDifference = taxpayerUnitLabel(left).localeCompare(taxpayerUnitLabel(right), "vi");
   if (labelDifference !== 0) return labelDifference;
   return (left.source_row ?? Number.MAX_SAFE_INTEGER) - (right.source_row ?? Number.MAX_SAFE_INTEGER) || left.id - right.id;
+}
+
+function taxpayerUnitRecordKey(unit: TaxpayerUnitRow) {
+  return unit.source_unit_key;
 }
 
 function waitForTaxpayerBatchRetry(delayMs: number, signal: AbortSignal) {
@@ -282,6 +294,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
   const [years, setYears] = useState<string[]>(DEFAULT_YEARS);
   const [selectedYear, setSelectedYear] = useState(routeYear ?? DEFAULT_YEAR);
   const [rows, setRows] = useState<TaxpayerRow[]>([]);
+  const [units, setUnits] = useState<TaxpayerUnitRow[]>([]);
   const [activityRows, setActivityRows] = useState<ActivityRow[]>([]);
   const [isActivityLoading, setIsActivityLoading] = useState(false);
   const [activityError, setActivityError] = useState<string | null>(null);
@@ -359,9 +372,11 @@ export default function Dashboard({ username, role }: DashboardProps) {
     setIsLoading(true);
     setError(null);
     setRows([]);
+    setUnits([]);
 
     const loadedRows: TaxpayerRow[] = [];
     let loadedYears: string[] | null = null;
+    let loadedUnits: TaxpayerUnitRow[] | null = null;
     let offset = 0;
 
     try {
@@ -377,6 +392,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
         const batchRows = payload.rows ?? [];
         loadedRows.push(...batchRows);
         if (payload.years?.length) loadedYears = payload.years;
+        if (payload.units) loadedUnits = payload.units;
 
         if (!payload.hasMore || batchRows.length === 0) break;
 
@@ -388,6 +404,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
       if (controller.signal.aborted) return;
 
       setRows(loadedRows);
+      setUnits(loadedUnits ?? []);
       if (loadedYears?.length) {
         setYears(loadedYears);
         if (viewMode === "sheets" && !loadedYears.includes(selectedYear)) {
@@ -400,6 +417,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
       if (controller.signal.aborted) return;
       setError(loadError instanceof Error ? loadError.message : "Không thể tải danh sách.");
       setRows([]);
+      setUnits([]);
     } finally {
       if (dataLoadController.current === controller) {
         dataLoadController.current = null;
@@ -497,6 +515,71 @@ export default function Dashboard({ username, role }: DashboardProps) {
   const pageStart = filteredRows.length ? (safePage - 1) * PAGE_SIZE + 1 : 0;
   const pageEnd = Math.min(safePage * PAGE_SIZE, filteredRows.length);
   const pageVisibleCount = filteredRows.length ? pageEnd - pageStart + 1 : 0;
+  const showEmptyUnitGroups = viewMode === "sheets" && !query.trim() && statusFilter === "all";
+  const unitSections = useMemo(() => {
+    if (viewMode !== "sheets") return [];
+
+    const rowsByUnit = new Map<string, TaxpayerRow[]>();
+    for (const row of filteredRows) {
+      const key = taxpayerUnitKey(row);
+      const groupRows = rowsByUnit.get(key) ?? [];
+      groupRows.push(row);
+      rowsByUnit.set(key, groupRows);
+    }
+
+    const sections = units.map((unit) => ({
+      key: taxpayerUnitRecordKey(unit),
+      label: getTaxpayerUnitDisplayName(unit.source_unit_key, unit.source_unit_label),
+      order: unit.source_unit_order,
+      rows: rowsByUnit.get(unit.source_unit_key) ?? [],
+    }));
+    const knownKeys = new Set(sections.map((section) => section.key));
+    for (const [key, groupRows] of rowsByUnit) {
+      if (knownKeys.has(key)) continue;
+      const firstRow = groupRows[0];
+      sections.push({
+        key,
+        label: taxpayerUnitLabel(firstRow),
+        order: getTaxpayerUnitOrder(firstRow.source_unit_key, firstRow.source_unit_order),
+        rows: groupRows,
+      });
+    }
+
+    return sections
+      .sort((left, right) => left.order - right.order || left.label.localeCompare(right.label, "vi"))
+      .filter((section) => section.rows.length > 0 || showEmptyUnitGroups);
+  }, [filteredRows, showEmptyUnitGroups, units, viewMode]);
+  const pagedUnitSections = useMemo(() => {
+    if (viewMode !== "sheets") return [];
+    const pageRowIds = new Set(pagedRows.map((row) => row.id));
+    const pageSections = [];
+    for (const section of unitSections) {
+      const pageRows = section.rows.filter((row) => pageRowIds.has(row.id));
+      if (pageRows.length > 0 || (showEmptyUnitGroups && safePage === 1 && section.rows.length === 0)) {
+        pageSections.push({ ...section, rows: pageRows });
+      }
+    }
+    return pageSections;
+  }, [pagedRows, safePage, showEmptyUnitGroups, unitSections, viewMode]);
+
+  function renderTaxpayerDataRow(row: TaxpayerRow) {
+    const detail = row.taxpayer;
+    const isExpanded = expandedRow === row.id;
+    const sourceIsStale = isSourceDataStale(detail?.source_updated_at ?? null);
+    const refreshTitle = `Tra cứu thủ công tại Cục Thuế cho ${row.tax_code}`;
+    return <Fragment key={row.id}>
+      <tr className={`data-row ${isExpanded ? "data-row-expanded" : ""}`} onClick={() => setExpandedRow(isExpanded ? null : row.id)}>
+        <td className="col-expand"><CaretRight size={16} className={isExpanded ? "caret-open" : ""} /></td>
+        <td className="tax-code-cell"><div className="tax-code-with-action"><span>{row.tax_code}</span>{canWrite ? <><button className="row-update-button" type="button" title={refreshTitle} aria-label={refreshTitle} disabled={Boolean(updatingTaxCode) || isStartingManualLookup || Boolean(manualLookup) || isRefreshingAll} onClick={(event) => { event.stopPropagation(); void refreshTaxpayer(row); }}><ArrowsClockwise size={13} className={updatingTaxCode === row.tax_code ? "update-icon-spinning" : ""} /></button><button className="row-delete-button" type="button" title={`Xóa toàn bộ MST ${row.tax_code}`} aria-label={`Xóa toàn bộ MST ${row.tax_code}`} disabled={isDeleting || isRefreshingAll || Boolean(manualLookup)} onClick={(event) => { event.stopPropagation(); openDeleteDialog(row); }}><Trash size={13} /></button></> : null}</div></td>
+        <td><strong>{detail?.name ?? row.source_vendor_name ?? "Chưa có tên"}</strong>{sourceIsStale ? <small className="stale-source-label">Dữ liệu cũ</small> : null}<small>{detail?.address ?? ""}</small></td>
+        <td><span className="sheet-label">{row.source_sheet}</span></td>
+        <td><span className={statusClass(detail)}>{statusLabel(detail)}</span></td>
+        <td className="date-cell">{formatDate(detail?.last_checked_at ?? null)}</td>
+        <td className="note-cell">{formatSourceDate(detail?.source_updated_at ?? null)}</td>
+      </tr>
+      {isExpanded ? <tr key={`${row.id}-detail`} className="detail-row"><td colSpan={7}><DetailPanel row={row} /></td></tr> : null}
+    </Fragment>;
+  }
 
   async function search(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1020,27 +1103,10 @@ export default function Dashboard({ username, role }: DashboardProps) {
               <table className="data-table">
                 <thead><tr><th className="col-expand" /><th>Mã số thuế</th><th>Tên người nộp thuế</th><th>Năm</th><th>Tình trạng</th><th title="Lần hệ thống tra cứu endpoint gần nhất">Tra cứu lúc</th><th>Nguồn dữ liệu</th></tr></thead>
                 <tbody>
-                  {isLoading ? <TableSkeleton /> : filteredRows.length === 0 ? <tr><td colSpan={7}><div className="table-empty"><FileText size={26} /><strong>Chưa có dữ liệu để hiển thị</strong><span>Dữ liệu sẽ xuất hiện sau khi migration và seed Supabase hoàn tất.</span></div></td></tr> : pagedRows.map((row, rowIndex) => {
-                    const detail = row.taxpayer;
-                    const isExpanded = expandedRow === row.id;
-                    const sourceIsStale = isSourceDataStale(detail?.source_updated_at ?? null);
-                    const refreshTitle = `Tra cứu thủ công tại Cục Thuế cho ${row.tax_code}`;
-                    const previousRow = rowIndex > 0 ? pagedRows[rowIndex - 1] : null;
-                    const startsUnitGroup = viewMode === "sheets" && (!previousRow || taxpayerUnitKey(previousRow) !== taxpayerUnitKey(row));
-                    return <Fragment key={row.id}>
-                      {startsUnitGroup ? <tr className="unit-group-row"><td colSpan={7}><strong>{taxpayerUnitLabel(row)}</strong><small>Danh sách MST theo đơn vị</small></td></tr> : null}
-                      <tr key={row.id} className={`data-row ${isExpanded ? "data-row-expanded" : ""}`} onClick={() => setExpandedRow(isExpanded ? null : row.id)}>
-                        <td className="col-expand"><CaretRight size={16} className={isExpanded ? "caret-open" : ""} /></td>
-                        <td className="tax-code-cell"><div className="tax-code-with-action"><span>{row.tax_code}</span>{canWrite ? <><button className="row-update-button" type="button" title={refreshTitle} aria-label={refreshTitle} disabled={Boolean(updatingTaxCode) || isStartingManualLookup || Boolean(manualLookup) || isRefreshingAll} onClick={(event) => { event.stopPropagation(); void refreshTaxpayer(row); }}><ArrowsClockwise size={13} className={updatingTaxCode === row.tax_code ? "update-icon-spinning" : ""} /></button><button className="row-delete-button" type="button" title={`Xóa toàn bộ MST ${row.tax_code}`} aria-label={`Xóa toàn bộ MST ${row.tax_code}`} disabled={isDeleting || isRefreshingAll || Boolean(manualLookup)} onClick={(event) => { event.stopPropagation(); openDeleteDialog(row); }}><Trash size={13} /></button></> : null}</div></td>
-                        <td><strong>{detail?.name ?? row.source_vendor_name ?? "Chưa có tên"}</strong>{sourceIsStale ? <small className="stale-source-label">Dữ liệu cũ</small> : null}<small>{detail?.address ?? ""}</small></td>
-                        <td><span className="sheet-label">{row.source_sheet}</span></td>
-                        <td><span className={statusClass(detail)}>{statusLabel(detail)}</span></td>
-                        <td className="date-cell">{formatDate(detail?.last_checked_at ?? null)}</td>
-                        <td className="note-cell">{formatSourceDate(detail?.source_updated_at ?? null)}</td>
-                      </tr>
-                      {isExpanded ? <tr key={`${row.id}-detail`} className="detail-row"><td colSpan={7}><DetailPanel row={row} /></td></tr> : null}
-                    </Fragment>;
-                  })}
+                  {isLoading ? <TableSkeleton /> : filteredRows.length === 0 && !showEmptyUnitGroups ? <tr><td colSpan={7}><div className="table-empty"><FileText size={26} /><strong>Chưa có dữ liệu để hiển thị</strong><span>Dữ liệu sẽ xuất hiện sau khi migration và seed Supabase hoàn tất.</span></div></td></tr> : viewMode === "sheets" ? pagedUnitSections.map((section) => <Fragment key={`unit-${section.key}`}>
+                    <tr className="unit-group-row"><td colSpan={7}><strong>{section.label}</strong></td></tr>
+                    {section.rows.map(renderTaxpayerDataRow)}
+                  </Fragment>) : pagedRows.map(renderTaxpayerDataRow)}
                 </tbody>
               </table>
             </div>

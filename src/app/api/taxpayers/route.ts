@@ -23,6 +23,13 @@ type TaxpayerRecord = {
   next_check_at: string | null;
 };
 
+type TaxpayerSourceUnitRecord = {
+  source_year: string;
+  source_unit_key: string;
+  source_unit_label: string;
+  source_unit_order: number;
+};
+
 function normalizeYear(value: string) {
   const normalized = value.trim();
   if (/^\d{4}$/.test(normalized)) return normalized;
@@ -73,16 +80,42 @@ export async function GET(request: Request) {
         .range(from, to), 10000)
     : Promise.resolve({ data: [], error: null });
 
-  const [allYearRowsResult, sourceResult] = await Promise.all([allYearRowsPromise, sourceQuery]);
+  const allUnitYearRowsPromise = includeYears
+    ? readAllPages((from, to) => supabase
+        .from("taxpayer_source_units")
+        .select("source_year")
+        .range(from, to), 10000)
+    : Promise.resolve({ data: [], error: null });
 
-  if (allYearRowsResult.error || sourceResult.error) {
-    console.error("taxpayer source query failed", allYearRowsResult.error ?? sourceResult.error);
+  const sourceUnitQuery = (() => {
+    let query = supabase
+      .from("taxpayer_source_units")
+      .select("source_year, source_unit_key, source_unit_label, source_unit_order")
+      .order("source_unit_order", { ascending: true })
+      .order("source_unit_key", { ascending: true });
+    if (year !== "all") query = query.eq("source_year", year);
+    return query;
+  })();
+
+  const [allYearRowsResult, allUnitYearRowsResult, sourceResult, sourceUnitResult] = await Promise.all([
+    allYearRowsPromise,
+    allUnitYearRowsPromise,
+    sourceQuery,
+    sourceUnitQuery,
+  ]);
+
+  if (allYearRowsResult.error || allUnitYearRowsResult.error || sourceResult.error || sourceUnitResult.error) {
+    console.error("taxpayer source query failed", allYearRowsResult.error ?? allUnitYearRowsResult.error ?? sourceResult.error ?? sourceUnitResult.error);
     return NextResponse.json({ error: "Không thể tải danh sách MST." }, { status: 500 });
   }
 
-  const years = [...new Set((allYearRowsResult.data ?? []).map((row) => row.source_year).filter((value): value is string => Boolean(value)))]
+  const years = [...new Set([
+    ...(allYearRowsResult.data ?? []).map((row) => row.source_year),
+    ...(allUnitYearRowsResult.data ?? []).map((row) => row.source_year),
+  ].filter((value): value is string => Boolean(value)))]
     .sort((left, right) => Number(left) - Number(right));
   const sourceRows = sourceResult.data ?? [];
+  const sourceUnits = (sourceUnitResult.data as TaxpayerSourceUnitRecord[] | null) ?? [];
   const taxCodes = [...new Set(sourceRows.map((source) => normalizeTaxCode(source.tax_code)))];
   const taxpayerResult = taxCodes.length
     ? await readInCodeBatches(taxCodes, (batch) => supabase
@@ -104,6 +137,7 @@ export async function GET(request: Request) {
   return NextResponse.json({
     rows,
     years: includeYears ? years : undefined,
+    units: year === "all" ? undefined : sourceUnits,
     hasMore: sourceRows.length === batchSize,
     nextOffset: offset + sourceRows.length,
   });

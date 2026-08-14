@@ -120,6 +120,7 @@ export async function POST(request: Request) {
   const { error: previewError } = await supabase.from("taxpayer_excel_imports").update({
     status: "previewed",
     candidates,
+    source_units: parsed.units,
     preview_stats: counts,
     source_years: sourceYears,
     previewed_at: new Date().toISOString(),
@@ -141,6 +142,7 @@ export async function POST(request: Request) {
     importId: importSession.id,
     fileName: importSession.file_name,
     candidates,
+    units: parsed.units,
     counts,
     invalidRows: parsed.invalidRows,
     ignoredSheets: parsed.ignoredSheets,

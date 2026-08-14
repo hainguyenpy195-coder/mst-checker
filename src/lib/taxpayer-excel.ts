@@ -34,6 +34,13 @@ export type TaxpayerExcelCandidate = {
   sources: TaxpayerExcelSource[];
 };
 
+export type TaxpayerExcelUnit = {
+  sourceYear: string;
+  unitKey: string;
+  unitLabel: string;
+  unitOrder: number;
+};
+
 export type TaxpayerExcelInvalidRow = {
   sourceSheet: string;
   sourceRow: number;
@@ -43,6 +50,7 @@ export type TaxpayerExcelInvalidRow = {
 
 export type TaxpayerExcelParseResult = {
   candidates: TaxpayerExcelCandidate[];
+  units: TaxpayerExcelUnit[];
   totalRows: number;
   validRows: number;
   duplicateRows: number;
@@ -60,6 +68,12 @@ export type TaxpayerWorkbookExportRow = {
   note: string;
   unitKey: string | null;
   unitLabel: string | null;
+  unitOrder: number | null;
+};
+
+export type TaxpayerWorkbookExportUnit = {
+  unitKey: string;
+  unitLabel: string;
   unitOrder: number | null;
 };
 
@@ -172,6 +186,7 @@ export async function parseTaxpayerWorkbook(buffer: Buffer | Uint8Array): Promis
   await workbook.xlsx.load(workbookBuffer);
 
   const candidates = new Map<string, TaxpayerExcelCandidate>();
+  const units = new Map<string, TaxpayerExcelUnit>();
   const invalidRows: TaxpayerExcelInvalidRow[] = [];
   const ignoredSheets: string[] = [];
   let totalRows = 0;
@@ -199,6 +214,12 @@ export async function parseTaxpayerWorkbook(buffer: Buffer | Uint8Array): Promis
       const unitHeading = findUnitHeading(worksheet, rowNumber, header.taxCodeColumn);
       if (unitHeading) {
         currentUnit = unitHeading;
+        units.set(`${sourceYear}:${unitHeading.key}`, {
+          sourceYear,
+          unitKey: unitHeading.key,
+          unitLabel: unitHeading.sourceLabel,
+          unitOrder: unitHeading.order ?? Number.MAX_SAFE_INTEGER,
+        });
         continue;
       }
 
@@ -250,6 +271,7 @@ export async function parseTaxpayerWorkbook(buffer: Buffer | Uint8Array): Promis
 
   return {
     candidates: [...candidates.values()],
+    units: [...units.values()].sort((left, right) => Number(left.sourceYear) - Number(right.sourceYear) || left.unitOrder - right.unitOrder || left.unitLabel.localeCompare(right.unitLabel, "vi")),
     totalRows,
     validRows,
     duplicateRows,
@@ -259,7 +281,7 @@ export async function parseTaxpayerWorkbook(buffer: Buffer | Uint8Array): Promis
   };
 }
 
-export function addTaxpayerWorksheet(workbook: ExcelJS.Workbook, year: string, rows: TaxpayerWorkbookExportRow[]) {
+export function addTaxpayerWorksheet(workbook: ExcelJS.Workbook, year: string, rows: TaxpayerWorkbookExportRow[], units: TaxpayerWorkbookExportUnit[] = []) {
   const worksheet = workbook.addWorksheet(year.slice(0, 31));
   worksheet.mergeCells("A1:H1");
   const titleCell = worksheet.getCell("A1");
@@ -287,41 +309,61 @@ export function addTaxpayerWorksheet(workbook: ExcelJS.Workbook, year: string, r
   ];
   worksheet.getColumn(4).hidden = true;
 
-  let previousUnitKey: string | null = null;
   let dataIndex = 0;
-  rows.forEach((row) => {
-    const unitKey = row.unitKey ?? row.unitLabel ?? "unclassified";
-    if (unitKey !== previousUnitKey) {
-      const unitRow = worksheet.addRow([
-        row.unitOrder && row.unitOrder <= 100 ? toRomanNumeral(row.unitOrder) : "",
-        row.unitLabel || "Chưa phân loại",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-      ]);
-      unitRow.font = { name: "Arial", size: 10, bold: true, color: { argb: "FF0B5F8A" } };
-      unitRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE7F4FA" } };
-      previousUnitKey = unitKey;
-    }
+  const unitByKey = new Map<string, TaxpayerWorkbookExportUnit>();
+  for (const unit of units) unitByKey.set(unit.unitKey, unit);
 
-    const worksheetRow = worksheet.addRow([
-      dataIndex + 1,
-      row.name,
-      row.taxCode,
+  const rowsByUnit = new Map<string, TaxpayerWorkbookExportRow[]>();
+  for (const row of rows) {
+    const unitKey = row.unitKey ?? row.unitLabel ?? "unclassified";
+    const currentRows = rowsByUnit.get(unitKey) ?? [];
+    currentRows.push(row);
+    rowsByUnit.set(unitKey, currentRows);
+    if (!unitByKey.has(unitKey)) {
+      unitByKey.set(unitKey, {
+        unitKey,
+        unitLabel: row.unitLabel || "Chưa phân loại",
+        unitOrder: row.unitOrder,
+      });
+    }
+  }
+
+  const orderedUnits = [...unitByKey.values()].sort((left, right) =>
+    (left.unitOrder ?? Number.MAX_SAFE_INTEGER) - (right.unitOrder ?? Number.MAX_SAFE_INTEGER)
+      || left.unitLabel.localeCompare(right.unitLabel, "vi"),
+  );
+
+  for (const unit of orderedUnits) {
+    const unitRow = worksheet.addRow([
+      unit.unitOrder && unit.unitOrder <= 100 ? toRomanNumeral(unit.unitOrder) : "",
+      unit.unitLabel || "Chưa phân loại",
       "",
-      row.status,
-      row.previousCheckedAt,
-      row.lastCheckedAt,
-      row.note,
+      "",
+      "",
+      "",
+      "",
+      "",
     ]);
-    worksheetRow.alignment = { vertical: "top", wrapText: true };
-    worksheetRow.font = { name: "Arial", size: 10 };
-    if (dataIndex % 2 === 1) worksheetRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF7FAFC" } };
-    dataIndex += 1;
-  });
+    unitRow.font = { name: "Arial", size: 10, bold: true, color: { argb: "FF0B5F8A" } };
+    unitRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE7F4FA" } };
+
+    for (const row of rowsByUnit.get(unit.unitKey) ?? []) {
+      const worksheetRow = worksheet.addRow([
+        dataIndex + 1,
+        row.name,
+        row.taxCode,
+        "",
+        row.status,
+        row.previousCheckedAt,
+        row.lastCheckedAt,
+        row.note,
+      ]);
+      worksheetRow.alignment = { vertical: "top", wrapText: true };
+      worksheetRow.font = { name: "Arial", size: 10 };
+      if (dataIndex % 2 === 1) worksheetRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF7FAFC" } };
+      dataIndex += 1;
+    }
+  }
 
   return worksheet;
 }

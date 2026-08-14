@@ -79,8 +79,11 @@ column for taxpayer data; other Excel columns are ignored. The master
 `taxpayers` table remains one row per MST, while `taxpayer_sources` keeps every
 year/unit/source-row occurrence, including MSTs that already exist in the
 master table. The yearly view and exports can therefore reproduce the source
-workbook grouping, while the overview still deduplicates by MST. Existing MSTs
-and invalid rows are reported separately. Large workbooks are uploaded directly
+workbook grouping, including empty unit headings stored in
+`taxpayer_source_units`, while the overview still deduplicates by MST. Re-import
+an existing source workbook once after enabling this metadata so its empty unit
+headings are backfilled. Existing MSTs and invalid rows are reported separately.
+Large workbooks are uploaded directly
 to the private
 `taxpayer-imports` Storage bucket; the Vercel API receives only the import
 session ID. A completed workbook import is also recorded as an

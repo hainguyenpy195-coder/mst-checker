@@ -43,7 +43,7 @@ function normalized(value) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
-    .replace(/đ/g, "d")
+    .replace(/đ/gi, "d")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -133,7 +133,7 @@ function normalizeUnitLabel(value) {
   return text(value)
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/đ/g, "d")
+    .replace(/đ/gi, "d")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
@@ -172,7 +172,7 @@ function parseSheet(dbYear, worksheet) {
   const headerIndex = findHeaderIndex(rows);
 
   if (headerIndex < 0) {
-    return { records: [], issues: [{ sourceSheet: dbYear, sourceRow: null, rawTaxCode: null, issueType: "header_not_found" }] };
+    return { records: [], units: [], issues: [{ sourceSheet: dbYear, sourceRow: null, rawTaxCode: null, issueType: "header_not_found" }] };
   }
 
   const header = rows[headerIndex];
@@ -184,10 +184,11 @@ function parseSheet(dbYear, worksheet) {
   const noteColumn = findColumn(header, [/ghi chu/, /note/]);
 
   if (taxCodeColumn < 0) {
-    return { records: [], issues: [{ sourceSheet: dbYear, sourceRow: headerIndex + 1, rawTaxCode: null, issueType: "tax_code_column_not_found" }] };
+    return { records: [], units: [], issues: [{ sourceSheet: dbYear, sourceRow: headerIndex + 1, rawTaxCode: null, issueType: "tax_code_column_not_found" }] };
   }
 
   const records = [];
+  const units = new Map();
   const issues = [];
   let currentUnit = null;
 
@@ -199,6 +200,14 @@ function parseSheet(dbYear, worksheet) {
 
     if (UNIT_MARKER_PATTERN.test(text(row[0])) && text(row[1]) && !taxCode) {
       currentUnit = resolveSourceUnit(row[0], row[1]);
+      if (currentUnit.order) {
+        units.set(currentUnit.key, {
+          sourceYear: dbYear,
+          sourceUnitKey: currentUnit.key,
+          sourceUnitLabel: currentUnit.label,
+          sourceUnitOrder: currentUnit.order,
+        });
+      }
       return;
     }
 
@@ -226,13 +235,14 @@ function parseSheet(dbYear, worksheet) {
     });
   });
 
-  return { records, issues };
+  return { records, units: [...units.values()], issues };
 }
 
 async function createSql(inputPath, outputPath) {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(inputPath);
   const allRecords = [];
+  const allUnits = new Map();
   const allIssues = [];
 
   for (const target of TARGET_SHEETS) {
@@ -244,6 +254,7 @@ async function createSql(inputPath, outputPath) {
     }
     const parsed = parseSheet(target.dbYear, worksheet);
     allRecords.push(...parsed.records);
+    for (const unit of parsed.units) allUnits.set(`${unit.sourceYear}:${unit.sourceUnitKey}`, unit);
     allIssues.push(...parsed.issues);
   }
 
@@ -261,6 +272,12 @@ async function createSql(inputPath, outputPath) {
     `-- Rows read: ${allRecords.length}; unique valid MST: ${unique.size}; issues: ${allIssues.length}`,
     "begin;",
   ];
+
+  for (const unit of [...allUnits.values()].sort((left, right) => Number(left.sourceYear) - Number(right.sourceYear) || left.sourceUnitOrder - right.sourceUnitOrder)) {
+    lines.push(
+      `insert into public.taxpayer_source_units (source_year, source_unit_key, source_unit_label, source_unit_order) values (${sqlText(unit.sourceYear)}, ${sqlText(unit.sourceUnitKey)}, ${sqlText(unit.sourceUnitLabel)}, ${unit.sourceUnitOrder}) on conflict (source_year, source_unit_key) do update set source_unit_label = excluded.source_unit_label, source_unit_order = excluded.source_unit_order, updated_at = now();`,
+    );
+  }
 
   for (const record of unique.values()) {
     const status = record.status || null;

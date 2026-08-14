@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { TaxpayerExcelCandidate } from "@/lib/taxpayer-excel";
+import type { TaxpayerExcelCandidate, TaxpayerExcelUnit } from "@/lib/taxpayer-excel";
 
 export const TAXPAYER_IMPORT_BUCKET = "taxpayer-imports";
 export const TAXPAYER_IMPORT_STORAGE_MAX_BYTES = 20 * 1024 * 1024;
@@ -14,6 +14,7 @@ export type TaxpayerImportSession = {
   actor_username: string;
   status: "uploading" | "previewed" | "committing" | "completed" | "failed" | "cancelled";
   candidates: TaxpayerExcelCandidate[];
+  source_units: TaxpayerExcelUnit[];
   preview_stats: Record<string, unknown>;
   source_years: string[];
   commit_offset: number;
@@ -60,6 +61,22 @@ export async function deleteTaxpayerImportFile(supabase: SupabaseClient, storage
 
 export function readStoredCandidates(value: unknown): TaxpayerExcelCandidate[] {
   return Array.isArray(value) ? value as TaxpayerExcelCandidate[] : [];
+}
+
+export function readStoredSourceUnits(value: unknown): TaxpayerExcelUnit[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is TaxpayerExcelUnit => {
+    if (!item || typeof item !== "object") return false;
+    const record = item as Record<string, unknown>;
+    return typeof record.sourceYear === "string"
+      && /^\d{4}$/.test(record.sourceYear)
+      && typeof record.unitKey === "string"
+      && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(record.unitKey)
+      && typeof record.unitLabel === "string"
+      && record.unitLabel.trim().length > 0
+      && Number.isInteger(record.unitOrder)
+      && Number(record.unitOrder) > 0;
+  });
 }
 
 export function getImportSourceYears(candidates: TaxpayerExcelCandidate[]) {

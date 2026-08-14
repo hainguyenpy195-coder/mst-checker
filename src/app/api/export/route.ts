@@ -3,7 +3,7 @@ import ExcelJS from "exceljs";
 import { authenticateRequest } from "@/lib/app-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { readAllPages, readInCodeBatches } from "@/lib/supabase-pagination";
-import { addTaxpayerWorksheet, type TaxpayerWorkbookExportRow } from "@/lib/taxpayer-excel";
+import { addTaxpayerWorksheet, type TaxpayerWorkbookExportRow, type TaxpayerWorkbookExportUnit } from "@/lib/taxpayer-excel";
 import { getTaxpayerUnitDisplayName, getTaxpayerUnitOrder } from "@/lib/taxpayer-units";
 
 export const runtime = "nodejs";
@@ -23,6 +23,13 @@ type StatusHistoryRecord = {
   old_status: string | null;
   new_status: string | null;
   detected_at: string;
+};
+
+type TaxpayerSourceUnitRecord = {
+  source_year: string;
+  source_unit_key: string;
+  source_unit_label: string;
+  source_unit_order: number;
 };
 
 function formatDate(value: string | null) {
@@ -67,6 +74,20 @@ export async function GET(request: Request) {
   const { data: sources, error: sourceError } = sourceResult;
   if (sourceError) return NextResponse.json({ error: "Không thể tải dữ liệu để xuất Excel." }, { status: 500 });
 
+  const sourceUnitResult = await readAllPages((from, to) => {
+    let query = supabase
+      .from("taxpayer_source_units")
+      .select("source_year, source_unit_key, source_unit_label, source_unit_order")
+      .order("source_year", { ascending: true })
+      .order("source_unit_order", { ascending: true })
+      .order("source_unit_key", { ascending: true })
+      .range(from, to);
+    if (requestedYear !== "all") query = query.eq("source_year", requestedYear);
+    return query;
+  }, 10000);
+  const { data: sourceUnitRows, error: sourceUnitError } = sourceUnitResult;
+  if (sourceUnitError) return NextResponse.json({ error: "Không thể tải danh sách đơn vị để xuất Excel." }, { status: 500 });
+
   const rows = sources ?? [];
   const taxCodes = [...new Set(rows.map((row) => row.tax_code))];
   const taxpayerResult = taxCodes.length
@@ -100,10 +121,17 @@ export async function GET(request: Request) {
     grouped.set(year, list);
   }
 
+  const unitsByYear = new Map<string, TaxpayerSourceUnitRecord[]>();
+  for (const unit of (sourceUnitRows as TaxpayerSourceUnitRecord[] | null) ?? []) {
+    const list = unitsByYear.get(unit.source_year) ?? [];
+    list.push(unit);
+    unitsByYear.set(unit.source_year, list);
+  }
+
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "TAX ID Checker";
   workbook.created = new Date();
-  const years = [...grouped.keys()].sort((left, right) => Number(left) - Number(right));
+  const years = [...new Set([...grouped.keys(), ...unitsByYear.keys()])].sort((left, right) => Number(left) - Number(right));
 
   for (const year of years) {
     const exportRows: TaxpayerWorkbookExportRow[] = (grouped.get(year) ?? [])
@@ -132,7 +160,12 @@ export async function GET(request: Request) {
         unitOrder: Number.isInteger(source.source_unit_order) ? source.source_unit_order : null,
       };
     });
-    addTaxpayerWorksheet(workbook, year, exportRows);
+    const exportUnits: TaxpayerWorkbookExportUnit[] = (unitsByYear.get(year) ?? []).map((unit) => ({
+      unitKey: unit.source_unit_key,
+      unitLabel: getTaxpayerUnitDisplayName(unit.source_unit_key, unit.source_unit_label),
+      unitOrder: getTaxpayerUnitOrder(unit.source_unit_key, unit.source_unit_order),
+    }));
+    addTaxpayerWorksheet(workbook, year, exportRows, exportUnits);
   }
 
   if (!years.length) workbook.addWorksheet("Danh sách trống");
