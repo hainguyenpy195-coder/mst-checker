@@ -448,14 +448,43 @@ button:not(:disabled):active { transform: translateY(1px); }
 .invoice-provider-link { text-decoration: none; }
 .invoice-verification-actions { flex-wrap: wrap; }
 .invoice-tax-note { color: var(--muted) !important; font-size: 11px !important; line-height: 1.5 !important; }
-.purchase-intro-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
-.purchase-intro-actions > .outline-button { white-space: nowrap; }
+.purchase-invoice-page { margin-top: 0; }
 .purchase-toolbar-tools { align-items: flex-end; }
 .purchase-date-range { display: flex; align-items: flex-end; gap: 8px; }
 .purchase-date-filter { display: grid; gap: 4px; color: var(--muted); font-size: 10px; font-weight: 650; }
 .purchase-date-filter input { min-width: 136px; min-height: 36px; padding: 0 9px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-control); outline: 0; font: inherit; font-size: 12px; }
 .purchase-date-filter input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
-.purchase-date-hint { padding-bottom: 10px; color: var(--muted); font-size: 10px; white-space: nowrap; }
+.purchase-invoice-table-section .table-toolbar { background: var(--header-surface); border-bottom: 1px solid var(--header-line); }
+.purchase-invoice-table-section .table-toolbar h2 { color: var(--header-ink); }
+.purchase-invoice-table-section .table-toolbar > div:first-child span { color: var(--header-muted); }
+.purchase-invoice-table-section .table-search { color: var(--header-muted); background: rgba(255, 255, 255, 0.08); border-color: var(--header-line); }
+.purchase-invoice-table-section .table-search:focus-within { border-color: var(--header-accent); box-shadow: 0 0 0 3px rgba(143, 212, 236, 0.2); }
+.purchase-invoice-table-section .table-search input { color: var(--header-ink); }
+.purchase-invoice-table-section .table-search input::placeholder { color: var(--header-muted); }
+.purchase-invoice-table-section .table-search button { color: var(--header-muted); }
+.purchase-invoice-table-section .purchase-date-filter { color: var(--header-muted); }
+.purchase-invoice-table-section .purchase-date-filter input { color: var(--header-ink); color-scheme: dark; background: rgba(255, 255, 255, 0.08); border-color: var(--header-line); }
+.purchase-invoice-table-section .purchase-date-filter input:focus { border-color: var(--header-accent); box-shadow: 0 0 0 3px rgba(143, 212, 236, 0.2); }
+.purchase-invoice-data-table { min-width: 1240px; }
+.purchase-invoice-number-cell { width: 108px; min-width: 108px; }
+.purchase-invoice-number-cell strong { font-variant-numeric: tabular-nums; }
+.purchase-seller-cell { min-width: 235px; }
+.purchase-goods-cell { min-width: 300px; max-width: 430px; }
+.purchase-goods-cell > span { display: -webkit-box; overflow: hidden; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.purchase-department-cell { min-width: 125px; white-space: nowrap; }
+.purchase-detail-action-cell { width: 1%; white-space: nowrap; }
+.purchase-detail-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 30px; padding: 0 9px; color: var(--accent-dark); background: var(--accent-soft); border: 1px solid var(--accent-border); border-radius: 8px; font-size: 10px; font-weight: 700; white-space: nowrap; transition: color 150ms ease, background 150ms ease, border-color 150ms ease, transform 150ms ease; }
+.purchase-detail-button:hover { color: #ffffff; background: var(--accent); border-color: var(--accent); transform: translateY(-1px); }
+.purchase-detail-button:focus-visible { outline: 0; box-shadow: 0 0 0 3px var(--accent-ring); }
+.purchase-invoice-detail-dialog { width: min(100%, 850px); max-height: calc(100dvh - 40px); overflow-y: auto; }
+.purchase-invoice-detail-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.purchase-invoice-detail-icon { color: var(--accent-dark); background: var(--accent-soft); border-color: var(--accent-border); }
+.purchase-invoice-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 19px 0 0; }
+.purchase-invoice-detail-field { display: grid; align-content: start; gap: 5px; min-width: 0; min-height: 70px; padding: 11px 12px; background: var(--surface-soft); border: 1px solid var(--line-soft); border-radius: 10px; }
+.purchase-invoice-detail-field-wide { grid-column: 1 / -1; }
+.purchase-invoice-detail-field dt { color: var(--muted); font-size: 10px; font-weight: 650; }
+.purchase-invoice-detail-field dd { min-width: 0; margin: 0; color: var(--ink); font-size: 12px; font-weight: 650; line-height: 1.5; overflow-wrap: anywhere; }
+.purchase-invoice-detail-field dd.mono-value { font-size: 11px; font-weight: 680; }
 
 /* Mobile-only views are mounted with the dashboard so they can reuse its state. */
 .mobile-dashboard, .mobile-activity-list { display: none; }
@@ -560,8 +589,6 @@ button:not(:disabled):active { transform: translateY(1px); }
   .taxpayer-import-invalid-row > span:last-child { grid-column: 1 / -1; }
   .invoice-intro { flex-direction: column; padding: 19px; }
   .invoice-quota { width: 100%; }
-  .purchase-intro-actions { width: 100%; align-items: stretch; flex-direction: column; }
-  .purchase-intro-actions > .outline-button { width: 100%; }
   .invoice-import-card { padding: 18px 16px; }
   .invoice-import-actions { justify-content: stretch; }
   .invoice-import-actions > button { flex: 1; }
@@ -574,7 +601,9 @@ button:not(:disabled):active { transform: translateY(1px); }
   .purchase-date-range { width: 100%; }
   .purchase-date-filter { flex: 1; }
   .purchase-date-filter input { width: 100%; min-width: 0; }
-  .purchase-date-hint { padding-bottom: 0; }
+  .purchase-invoice-detail-dialog { max-height: calc(100dvh - 24px); }
+  .purchase-invoice-detail-grid { grid-template-columns: 1fr; }
+  .purchase-invoice-detail-field-wide { grid-column: auto; }
   .invoice-prefill-grid { grid-template-columns: 1fr 1fr; }
 }
 

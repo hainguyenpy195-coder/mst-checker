@@ -20,10 +20,17 @@ const PURCHASE_INVOICE_SELECT = [
   "seller_tax_code",
   "invoice_template_number",
   "invoice_symbol",
+  "goods_services",
   "net_amount",
   "deductible_vat_amount",
+  "accounting_voucher",
+  "accounting_date",
+  "tax_rate",
+  "description",
+  "department_code",
   "source_sheet",
   "source_row",
+  "source_stt",
   "created_at",
 ].join(", ");
 
@@ -37,10 +44,17 @@ type PurchaseInvoiceRecord = {
   seller_tax_code: string | null;
   invoice_template_number: string | null;
   invoice_symbol: string | null;
+  goods_services: string | null;
   net_amount: number | string | null;
   deductible_vat_amount: number | string | null;
+  accounting_voucher: string | null;
+  accounting_date: string | null;
+  tax_rate: string | null;
+  description: string | null;
+  department_code: string | null;
   source_sheet: string;
   source_row: number;
+  source_stt: number | null;
   created_at: string;
 };
 

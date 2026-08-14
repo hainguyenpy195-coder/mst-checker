@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   CaretLeft,
   CaretRight,
   CheckCircle,
+  Eye,
   FileText,
   MagnifyingGlass,
   WarningCircle,
@@ -36,10 +37,17 @@ type PurchaseInvoiceRecord = {
   seller_tax_code: string | null;
   seller_name: string | null;
   seller_taxpayer: PurchaseTaxpayerSummary | null;
+  goods_services: string | null;
   net_amount: number | string | null;
   deductible_vat_amount: number | string | null;
+  accounting_voucher: string | null;
+  accounting_date: string | null;
+  tax_rate: string | null;
+  description: string | null;
+  department_code: string | null;
   source_sheet: string | null;
   source_row: number | null;
+  source_stt: number | null;
 };
 
 type PurchaseInvoiceListResponse = {
@@ -157,13 +165,6 @@ function taxpayerStatusMeta(invoice: PurchaseInvoiceRecord): TaxpayerStatusMeta 
   };
 }
 
-function invoiceIdentity(invoice: PurchaseInvoiceRecord) {
-  const template = invoice.invoice_template_number?.trim() || null;
-  const symbol = invoice.invoice_symbol?.replace(/\s+/g, "").toUpperCase() || null;
-  if (template && symbol) return `${template}${symbol}`;
-  return symbol ?? template ?? "—";
-}
-
 function sourceLabel(invoice: PurchaseInvoiceRecord) {
   const sheet = invoice.source_sheet?.trim() || "—";
   return invoice.source_row ? `${sheet} · dòng ${invoice.source_row}` : sheet;
@@ -180,6 +181,7 @@ export default function PurchaseInvoicePanel({ role }: { role: AppRole }) {
   const [dateTo, setDateTo] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [detailInvoice, setDetailInvoice] = useState<PurchaseInvoiceRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -228,11 +230,21 @@ export default function PurchaseInvoicePanel({ role }: { role: AppRole }) {
     return () => window.clearTimeout(timeout);
   }, [notice]);
 
+  useEffect(() => {
+    if (!detailInvoice) return;
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setDetailInvoice(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [detailInvoice]);
+
   const pageLabel = useMemo(() => {
-    if (!total) return "0 dòng";
+    if (!total) return "Hiển thị 0-0/0 hóa đơn";
     const start = (page - 1) * PAGE_SIZE + 1;
     const end = Math.min(page * PAGE_SIZE, total);
-    return `Hiển thị ${formatCount(start)}-${formatCount(end)} / ${formatCount(total)} dòng`;
+    return `Hiển thị ${formatCount(start)}-${formatCount(end)}/${formatCount(total)} hóa đơn`;
   }, [page, total]);
 
   function updateQuery(value: string) {
@@ -260,20 +272,9 @@ export default function PurchaseInvoicePanel({ role }: { role: AppRole }) {
   }
 
   return <section className="invoice-page purchase-invoice-page">
-    <div className="invoice-intro">
-      <div>
-        <span className="invoice-eyebrow">HÓA ĐƠN MUA VÀO</span>
-        <h2>Bảng tổng hợp mua vào</h2>
-        <p>Theo dõi hóa đơn mua vào từ file Excel. Dữ liệu được lọc theo ngày phát hành, số hóa đơn, nhà cung cấp hoặc mã số thuế.</p>
-      </div>
-      <div className="purchase-intro-actions">
-        {canWrite ? <button className="outline-button" type="button" onClick={() => { setError(null); setShowImportModal(true); }}><FileText size={17} /> Nhập Excel</button> : null}
-        <div className="invoice-quota purchase-total-card">
-          <span>Tổng dòng</span>
-          <strong>{formatCount(total)}</strong>
-          <small>{pageLabel}</small>
-        </div>
-      </div>
+    <div className="page-heading-row purchase-page-heading-row">
+      <h1>Mua vào</h1>
+      {canWrite ? <div className="heading-actions"><button className="outline-button" type="button" onClick={() => { setError(null); setShowImportModal(true); }}><FileText size={17} /> Nhập Excel</button></div> : null}
     </div>
 
     {notice ? <div className="page-notice page-notice-success" role="status"><CheckCircle size={18} /> {notice}</div> : null}
@@ -288,14 +289,13 @@ export default function PurchaseInvoicePanel({ role }: { role: AppRole }) {
             <label className="purchase-date-filter"><span>Từ ngày</span><input type="date" lang="vi-VN" value={dateFrom} max={dateTo || undefined} onChange={(event) => updateDateFrom(event.target.value)} aria-label="Từ ngày phát hành" /></label>
             <label className="purchase-date-filter"><span>Đến ngày</span><input type="date" lang="vi-VN" value={dateTo} min={dateFrom || undefined} onChange={(event) => updateDateTo(event.target.value)} aria-label="Đến ngày phát hành" /></label>
           </div>
-          <span className="purchase-date-hint">dd/MM/yyyy · gồm cả hai ngày</span>
         </div>
       </div>
       <div className="table-scroll">
         <table className="data-table invoice-data-table purchase-invoice-data-table">
-          <thead><tr><th>Ngày HĐ</th><th>Số hóa đơn</th><th>Nhà cung cấp / MST</th><th>Tình trạng MST</th><th>Mẫu số · Ký hiệu</th><th>Giá trị HHDV</th><th>VAT được khấu trừ</th><th>Nguồn</th></tr></thead>
+          <thead><tr><th>Ngày HĐ</th><th>Số hóa đơn</th><th>Nhà cung cấp / MST</th><th>Mặt hàng / HHDV</th><th>Giá trị HHDV</th><th>VAT được khấu trừ</th><th>Mã bộ phận</th><th aria-label="Xem chi tiết" /></tr></thead>
           <tbody>
-            {isLoading ? <PurchaseInvoiceTableSkeleton /> : rows.length === 0 ? <tr><td colSpan={8}><div className="table-empty"><FileText size={26} /><strong>Chưa có hóa đơn mua vào</strong><span>{canWrite ? "Nhấn Nhập Excel để thêm danh sách hóa đơn từ workbook." : "Chưa có dữ liệu hóa đơn mua vào để hiển thị."}</span></div></td></tr> : rows.map((invoice) => <PurchaseInvoiceTableRow key={invoice.id} invoice={invoice} />)}
+            {isLoading ? <PurchaseInvoiceTableSkeleton /> : rows.length === 0 ? <tr><td colSpan={8}><div className="table-empty"><FileText size={26} /><strong>Chưa có hóa đơn mua vào</strong><span>{canWrite ? "Nhấn Nhập Excel để thêm danh sách hóa đơn từ workbook." : "Chưa có dữ liệu hóa đơn mua vào để hiển thị."}</span></div></td></tr> : rows.map((invoice) => <PurchaseInvoiceTableRow key={invoice.id} invoice={invoice} onViewDetail={setDetailInvoice} />)}
           </tbody>
         </table>
       </div>
@@ -303,25 +303,69 @@ export default function PurchaseInvoicePanel({ role }: { role: AppRole }) {
     </section>
 
     {canWrite && showImportModal ? <PurchaseInvoiceExcelImportModal onClose={() => setShowImportModal(false)} onCompleted={handleImportCompleted} /> : null}
+    {detailInvoice ? <PurchaseInvoiceDetailDialog invoice={detailInvoice} onClose={() => setDetailInvoice(null)} /> : null}
   </section>;
 }
 
-function PurchaseInvoiceTableRow({ invoice }: { invoice: PurchaseInvoiceRecord }) {
+function PurchaseInvoiceTableRow({ invoice, onViewDetail }: { invoice: PurchaseInvoiceRecord; onViewDetail: (invoice: PurchaseInvoiceRecord) => void }) {
   const taxpayerStatus = taxpayerStatusMeta(invoice);
   const taxCode = invoice.seller_tax_code?.trim() ? normalizeTaxCode(invoice.seller_tax_code) : null;
 
   return <tr className="data-row invoice-data-row">
     <td className="amount-cell">{formatVietnameseDate(invoice.invoice_issue_date)}</td>
-    <td className="invoice-number-cell"><strong>{invoice.invoice_number ?? "—"}</strong></td>
-    <td><strong>{invoice.seller_name ?? invoice.seller_taxpayer?.name ?? "Chưa có tên người bán"}</strong><div className="invoice-seller-tax"><small className="mono-value">{taxCode ?? "Chưa có MST"}</small></div></td>
-    <td><span className={taxpayerStatus.className} title={taxpayerStatus.title}>{taxpayerStatus.label}</span></td>
-    <td><span>{invoiceIdentity(invoice)}</span><small>Mẫu {invoice.invoice_template_number ?? "—"} · Ký hiệu {invoice.invoice_symbol ?? "—"}</small></td>
+    <td className="purchase-invoice-number-cell"><strong>{invoice.invoice_number ?? "—"}</strong></td>
+    <td className="purchase-seller-cell"><strong>{invoice.seller_name ?? invoice.seller_taxpayer?.name ?? "Chưa có tên người bán"}</strong><div className="invoice-seller-tax"><small className="mono-value">{taxCode ?? "Chưa có MST"}</small><span className={taxpayerStatus.className} title={taxpayerStatus.title}>{taxpayerStatus.label}</span></div></td>
+    <td className="purchase-goods-cell" title={invoice.goods_services ?? undefined}><span>{invoice.goods_services ?? "—"}</span></td>
     <td className="amount-cell">{formatAmount(invoice.net_amount)}</td>
     <td className="amount-cell">{formatAmount(invoice.deductible_vat_amount)}</td>
-    <td><small>{sourceLabel(invoice)}</small></td>
+    <td className="purchase-department-cell"><span className="mono-value">{invoice.department_code ?? "—"}</span></td>
+    <td className="purchase-detail-action-cell"><button className="purchase-detail-button" type="button" onClick={() => onViewDetail(invoice)}><Eye size={15} /> Xem</button></td>
   </tr>;
 }
 
 function PurchaseInvoiceTableSkeleton() {
   return <>{Array.from({ length: 7 }, (_, index) => <tr className="table-skeleton" key={index}>{Array.from({ length: 8 }, (_, cellIndex) => <td key={cellIndex}><span /></td>)}</tr>)}</>;
+}
+
+function PurchaseInvoiceDetailDialog({ invoice, onClose }: { invoice: PurchaseInvoiceRecord; onClose: () => void }) {
+  const taxpayerStatus = taxpayerStatusMeta(invoice);
+  const taxCode = invoice.seller_tax_code?.trim() ? normalizeTaxCode(invoice.seller_tax_code) : "";
+
+  return <div className="confirm-backdrop">
+    <section className="confirm-dialog purchase-invoice-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="purchase-invoice-detail-title" aria-describedby="purchase-invoice-detail-description">
+      <div className="purchase-invoice-detail-heading">
+        <div className="confirm-dialog-icon purchase-invoice-detail-icon"><FileText size={22} weight="duotone" /></div>
+        <button className="icon-button" type="button" aria-label="Đóng chi tiết hóa đơn mua vào" onClick={onClose}><X size={17} /></button>
+      </div>
+      <h2 id="purchase-invoice-detail-title">Chi tiết hóa đơn mua vào</h2>
+      <p id="purchase-invoice-detail-description">Thông tin được lưu nguyên theo từng dòng hạch toán trong file Excel.</p>
+      <dl className="purchase-invoice-detail-grid">
+        <PurchaseInvoiceDetailField label="Số hóa đơn" value={invoice.invoice_number} mono />
+        <PurchaseInvoiceDetailField label="Ngày phát hành" value={formatVietnameseDate(invoice.invoice_issue_date)} />
+        <PurchaseInvoiceDetailField label="Mẫu số" value={invoice.invoice_template_number} mono />
+        <PurchaseInvoiceDetailField label="Ký hiệu" value={invoice.invoice_symbol} mono />
+        <PurchaseInvoiceDetailField label="Người bán" value={invoice.seller_name ?? invoice.seller_taxpayer?.name} wide />
+        <PurchaseInvoiceDetailField label="MST người bán" value={taxCode || invoice.seller_tax_code} mono />
+        <PurchaseInvoiceDetailField label="Tình trạng MST" value={<span className={taxpayerStatus.className} title={taxpayerStatus.title}>{taxpayerStatus.label}</span>} />
+        <PurchaseInvoiceDetailField label="Mặt hàng / HHDV" value={invoice.goods_services} wide />
+        <PurchaseInvoiceDetailField label="Giá trị HHDV chưa thuế" value={formatAmount(invoice.net_amount)} />
+        <PurchaseInvoiceDetailField label="VAT được khấu trừ" value={formatAmount(invoice.deductible_vat_amount)} />
+        <PurchaseInvoiceDetailField label="Chứng từ hạch toán" value={invoice.accounting_voucher} mono />
+        <PurchaseInvoiceDetailField label="Ngày hạch toán" value={formatVietnameseDate(invoice.accounting_date)} />
+        <PurchaseInvoiceDetailField label="Thuế suất" value={invoice.tax_rate} />
+        <PurchaseInvoiceDetailField label="Mã bộ phận" value={invoice.department_code} mono />
+        <PurchaseInvoiceDetailField label="Diễn giải" value={invoice.description} wide />
+        <PurchaseInvoiceDetailField label="Nguồn Excel" value={sourceLabel(invoice)} />
+        <PurchaseInvoiceDetailField label="STT gốc trong sheet" value={invoice.source_stt == null ? null : String(invoice.source_stt)} />
+      </dl>
+      <div className="confirm-actions"><button className="outline-button" type="button" onClick={onClose}>Đóng</button></div>
+    </section>
+  </div>;
+}
+
+function PurchaseInvoiceDetailField({ label, value, wide = false, mono = false }: { label: string; value: ReactNode | null | undefined; wide?: boolean; mono?: boolean }) {
+  return <div className={"purchase-invoice-detail-field" + (wide ? " purchase-invoice-detail-field-wide" : "")}>
+    <dt>{label}</dt>
+    <dd className={mono ? "mono-value" : undefined}>{value || "—"}</dd>
+  </div>;
 }

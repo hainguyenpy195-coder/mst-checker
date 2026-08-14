@@ -1205,16 +1205,16 @@ export default function Dashboard({ username, role }: DashboardProps) {
         </header>
 
         <main className="dashboard-content">
-          <div className={`page-heading-row ${isDataView ? "desktop-page-heading" : ""}`}>
+          {viewMode !== "purchases" ? <div className={`page-heading-row ${isDataView ? "desktop-page-heading" : ""}`}>
             <div>
-              <h1>{viewMode === "overview" ? "Bảng tổng hợp" : viewMode === "sheets" ? "Danh sách MST năm " + selectedYear : viewMode === "invoices" ? "Hóa đơn" : viewMode === "purchases" ? "Mua vào" : viewMode === "activity" ? "Lịch sử thao tác" : "Cấu hình"}</h1>
+              <h1>{viewMode === "overview" ? "Bảng tổng hợp" : viewMode === "sheets" ? "Danh sách MST năm " + selectedYear : viewMode === "invoices" ? "Hóa đơn" : viewMode === "activity" ? "Lịch sử thao tác" : "Cấu hình"}</h1>
             </div>
             {viewMode === "overview" || viewMode === "sheets" ? <div className="heading-actions">
               {canWrite ? <button className="outline-button" type="button" onClick={toggleAddForm} disabled={isRefreshingAll}><Plus size={17} /> Thêm MST</button> : null}
               {canWrite ? <button className="outline-button" type="button" onClick={() => { setShowImportModal(true); setError(null); setNotice(null); }} disabled={isRefreshingAll}><FileText size={17} /> Nhập Excel</button> : null}
               <button className="export-button" type="button" onClick={() => void exportWorkbook()} disabled={isExporting || isRefreshingAll}><DownloadSimple size={17} /> {isExporting ? "Đang xuất" : "Xuất Excel"}</button>
             </div> : null}
-          </div>
+          </div> : null}
 
           {canWrite && showAddForm ? <form className="add-panel" onSubmit={addTaxpayer}><div className="add-panel-heading"><div><strong>Thêm mã số thuế vào danh mục</strong><span>MST mới sẽ được đưa vào hàng đợi cập nhật.</span></div><button className="icon-button" type="button" aria-label="Đóng form" onClick={closeAddForm}>×</button></div><div className="add-grid"><label>Mã số thuế<input value={newTaxCode} onChange={(event) => handleTaxCodeChange(event.target.value)} onBlur={() => { void checkNewTaxCode(newTaxCode); }} placeholder="0101248141 hoặc 0105029292-022" pattern={TAX_CODE_INPUT_PATTERN} maxLength={14} title={TAX_CODE_FORMAT_HINT} aria-invalid={taxCodeLookupState === "duplicate" || taxCodeLookupState === "invalid"} aria-describedby={taxCodeLookupMessage ? "tax-code-lookup-status" : undefined} required /></label><label>Tên người nộp thuế<input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Tên doanh nghiệp" /></label><label>Năm theo dõi<input value={newYear} onChange={(event) => setNewYear(event.target.value)} inputMode="numeric" pattern="[0-9]{4}" maxLength={4} required /></label><label>Ghi chú<input value={newNote} onChange={(event) => setNewNote(event.target.value)} placeholder="Thông tin bổ sung (nếu có)" /></label></div>{taxCodeLookupMessage ? <div className={`add-lookup-status add-lookup-status-${taxCodeLookupState}`} id="tax-code-lookup-status" role={taxCodeLookupState === "duplicate" || taxCodeLookupState === "invalid" ? "alert" : "status"}>{taxCodeLookupState === "checking" ? <ArrowsClockwise size={16} className="update-icon-spinning" /> : taxCodeLookupState === "ready" ? <CheckCircle size={16} /> : <WarningCircle size={16} />}<span>{taxCodeLookupMessage}</span></div> : null}<div className="add-panel-actions"><button className="outline-button" type="button" onClick={closeAddForm}>Hủy</button><button className="export-button" type="submit" disabled={isAdding || taxCodeLookupState === "checking" || taxCodeLookupState === "duplicate"}>{isAdding ? "Đang thêm..." : "Lưu MST"}</button></div></form> : null}
 
