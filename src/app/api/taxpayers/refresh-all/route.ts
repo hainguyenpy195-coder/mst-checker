@@ -1,16 +1,33 @@
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAdminSession, READ_ONLY_FORBIDDEN_MESSAGE } from "@/lib/app-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { invokeTaxpayerBatchRefresh } from "@/lib/xinvoice-worker";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const REFRESH_PAUSED_KEY = "refresh_worker_paused";
 const QUEUE_STATES = ["queued", "running", "retry", "success", "dead_letter", "cancelled"] as const;
 type QueueState = (typeof QUEUE_STATES)[number];
-type RefreshMode = "start" | "continue" | "stop";
+type RefreshMode = "start" | "status" | "continue" | "pause" | "resume" | "stop";
 
-type QueueStatus = Record<QueueState, number> & { pending: number; total: number; completed: number };
+type QueueStatus = Record<QueueState, number> & {
+  pending: number;
+  total: number;
+  completed: number;
+};
+
+type RefreshStatus = QueueStatus & { paused: boolean };
+
+async function authenticateAdmin(request: Request) {
+  const session = await authenticateRequest(request);
+  if (!session) {
+    return { response: NextResponse.json({ error: "Bạn cần đăng nhập." }, { status: 401 }) };
+  }
+  if (!isAdminSession(session)) {
+    return { response: NextResponse.json({ error: READ_ONLY_FORBIDDEN_MESSAGE }, { status: 403 }) };
+  }
+  return { session };
+}
 
 async function getQueueStatus(supabase: ReturnType<typeof createAdminClient>): Promise<QueueStatus> {
   const results = await Promise.all(QUEUE_STATES.map(async (state) => {
@@ -35,117 +52,117 @@ async function getQueueStatus(supabase: ReturnType<typeof createAdminClient>): P
   };
 }
 
+async function getRefreshPaused(supabase: ReturnType<typeof createAdminClient>) {
+  const { data, error } = await supabase
+    .from("app_settings")
+    .select("setting_value")
+    .eq("setting_key", REFRESH_PAUSED_KEY)
+    .maybeSingle<{ setting_value: string }>();
+  if (error) throw error;
+  return data?.setting_value.toLowerCase() === "true";
+}
+
+async function setRefreshPaused(supabase: ReturnType<typeof createAdminClient>, paused: boolean) {
+  const { data, error } = await supabase.rpc("set_refresh_worker_paused", { p_paused: paused });
+  if (error) throw error;
+  return Boolean(data);
+}
+
+async function getRefreshStatus(supabase: ReturnType<typeof createAdminClient>): Promise<RefreshStatus> {
+  const [queue, paused] = await Promise.all([getQueueStatus(supabase), getRefreshPaused(supabase)]);
+  return { ...queue, paused };
+}
+
+function statusResponse(status: RefreshStatus, extra: Record<string, unknown> = {}) {
+  const done = status.pending === 0;
+  return NextResponse.json({
+    ok: true,
+    done,
+    active: !done,
+    paused: status.paused,
+    total: status.total,
+    completed: status.completed,
+    pending: status.pending,
+    queue: status,
+    ...extra,
+  });
+}
+
+export async function GET(request: Request) {
+  const auth = await authenticateAdmin(request);
+  if (auth.response) return auth.response;
+
+  try {
+    const status = await getRefreshStatus(createAdminClient());
+    return statusResponse(status);
+  } catch (error) {
+    console.error("refresh queue status read failed", error);
+    return NextResponse.json({ error: "Không thể đọc tiến trình cập nhật MST." }, { status: 500 });
+  }
+}
+
 export async function POST(request: Request) {
-  const session = await authenticateRequest(request);
-  if (!session) {
-    return NextResponse.json({ error: "Bạn cần đăng nhập." }, { status: 401 });
-  }
-  if (!isAdminSession(session)) {
-    return NextResponse.json({ error: READ_ONLY_FORBIDDEN_MESSAGE }, { status: 403 });
-  }
+  const auth = await authenticateAdmin(request);
+  if (auth.response) return auth.response;
 
   let body: { mode?: RefreshMode } = {};
   try {
     body = await request.json() as { mode?: RefreshMode };
   } catch {
-    // An empty body starts a manual refresh run.
+    // An empty body starts a new full refresh run.
   }
 
   const mode = body.mode ?? "start";
-  if (mode !== "start" && mode !== "continue" && mode !== "stop") {
+  if (!["start", "status", "continue", "pause", "resume", "stop"].includes(mode)) {
     return NextResponse.json({ error: "Chế độ cập nhật toàn bộ không hợp lệ." }, { status: 400 });
   }
 
   const supabase = createAdminClient();
-  let queue = await getQueueStatus(supabase);
-  let enqueued = 0;
-
-  if (mode === "stop") {
-    const { data, error } = await supabase.rpc("cancel_pending_taxpayer_refreshes");
-    if (error) {
-      console.error("manual all-taxpayer cancellation failed", error);
-      return NextResponse.json({ error: "Không thể dừng hàng đợi cập nhật toàn bộ." }, { status: 500 });
-    }
-
-    queue = await getQueueStatus(supabase);
-    return NextResponse.json({
-      ok: true,
-      done: queue.pending === 0,
-      stopped: true,
-      cancelled: Number(data ?? 0),
-      total: queue.total,
-      completed: queue.completed,
-      pending: queue.pending,
-      queue,
-      message: queue.pending === 0
-        ? "Đã dừng cập nhật toàn bộ."
-        : "Đã dừng nhận các MST mới; các MST đang xử lý sẽ hoàn tất lượt hiện tại.",
-    });
-  }
-
-  // A new manual run always requeues the full catalogue. The frontend locks
-  // the button while the run is active, so a normal start refreshes every MST
-  // instead of draining only the leftover retry rows.
-  if (mode === "start") {
-    const { data, error } = await supabase.rpc("enqueue_all_taxpayer_refreshes");
-    if (error) {
-      console.error("manual all-taxpayer enqueue failed", error);
-      return NextResponse.json({ error: "Không thể đưa toàn bộ MST vào hàng đợi cập nhật." }, { status: 500 });
-    }
-    enqueued = Number(data ?? 0);
-    queue = await getQueueStatus(supabase);
-  }
-
-  if (mode === "continue" && queue.pending === 0) {
-    return NextResponse.json({
-      ok: true,
-      done: true,
-      enqueued,
-      processed: 0,
-      skipped: 0,
-      total: queue.total,
-      completed: queue.completed,
-      pending: 0,
-      queue,
-    });
-  }
-
   try {
-    const workerPayload = await invokeTaxpayerBatchRefresh();
-    queue = await getQueueStatus(supabase);
-    const processed = workerPayload.processed ?? 0;
-    const skipped = workerPayload.results?.filter((result) => result.skipped).length ?? 0;
-    const done = queue.pending === 0;
+    if (mode === "start") {
+      await setRefreshPaused(supabase, false);
+      const { data, error } = await supabase.rpc("enqueue_all_taxpayer_refreshes");
+      if (error) throw error;
 
-    return NextResponse.json({
-      ok: true,
-      done,
-      enqueued,
-      processed,
-      skipped,
-      total: queue.total,
-      completed: queue.completed,
-      pending: queue.pending,
-      queue,
-      message: done
-        ? "Đã xử lý xong hàng đợi cập nhật toàn bộ."
-        : processed === 0
-          ? "Hàng đợi đang chờ lượt xử lý tiếp theo."
-          : undefined,
-    });
+      const status = await getRefreshStatus(supabase);
+      return statusResponse(status, {
+        started: true,
+        enqueued: Number(data ?? 0),
+        message: status.pending
+          ? "Đã đưa toàn bộ MST vào hàng đợi. Supabase Cron sẽ xử lý theo từng batch."
+          : "Không có MST cần đưa vào hàng đợi.",
+      });
+    }
+
+    if (mode === "pause" || mode === "stop") {
+      await setRefreshPaused(supabase, true);
+      const status = await getRefreshStatus(supabase);
+      return statusResponse(status, {
+        paused: true,
+        stopped: mode === "stop",
+        message: status.running
+          ? "Đã tạm dừng batch mới. MST đang xử lý sẽ hoàn tất lượt hiện tại."
+          : "Đã tạm dừng cập nhật. Vị trí trong hàng đợi được giữ nguyên.",
+      });
+    }
+
+    if (mode === "resume") {
+      await setRefreshPaused(supabase, false);
+      const status = await getRefreshStatus(supabase);
+      return statusResponse(status, {
+        resumed: true,
+        message: status.pending
+          ? "Đã tiếp tục cập nhật. Supabase Cron sẽ gọi batch kế tiếp trong lượt gần nhất."
+          : "Hàng đợi đã hoàn tất.",
+      });
+    }
+
+    // `status` and the legacy `continue` mode are read-only. The worker is no
+    // longer invoked by the browser; Supabase Cron owns queue draining.
+    const status = await getRefreshStatus(supabase);
+    return statusResponse(status);
   } catch (error) {
-    return NextResponse.json({
-      ok: true,
-      done: false,
-      enqueued,
-      processed: 0,
-      total: queue.total,
-      completed: queue.completed,
-      pending: queue.pending,
-      queue,
-      message: error instanceof Error
-        ? `Đã giữ hàng đợi để thử lại: ${error.message}`
-        : "Đã giữ hàng đợi để thử lại ở lượt tiếp theo.",
-    }, { status: 202 });
+    console.error("refresh queue control failed", error);
+    return NextResponse.json({ error: "Không thể điều khiển hàng đợi cập nhật MST." }, { status: 500 });
   }
 }

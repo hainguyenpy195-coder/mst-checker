@@ -9,6 +9,7 @@ type RefreshRequest = {
   taxCode?: string;
   taxCodes?: string[];
   preview?: boolean;
+  refreshMode?: "data" | "status";
 };
 
 type XInvoicePayload = {
@@ -76,6 +77,8 @@ type CurrentTaxpayer = {
   consecutive_failures: number;
 };
 
+type RefreshProvider = "xinvoice" | "vietqr";
+
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
 const secretKeysJson = Deno.env.get("SUPABASE_SECRET_KEYS");
 const singleSecretKey = Deno.env.get("SUPABASE_SECRET_KEY");
@@ -123,8 +126,12 @@ function normalizedDate(value: string | null | undefined) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-function isIncomingSourceOlder(currentSourceUpdatedAt: string | null, incomingSourceUpdatedAt: string | null) {
-  if (!currentSourceUpdatedAt || !incomingSourceUpdatedAt) return false;
+function shouldKeepCurrentSource(currentSourceUpdatedAt: string | null, incomingSourceUpdatedAt: string | null) {
+  if (!currentSourceUpdatedAt) return false;
+  // A response without a valid source timestamp cannot be proven newer than
+  // a snapshot confirmed by the Cục Thuế lookup. Keep the authoritative DB
+  // snapshot in that case instead of allowing an undated response to replace it.
+  if (!incomingSourceUpdatedAt) return true;
   return new Date(incomingSourceUpdatedAt).getTime() < new Date(currentSourceUpdatedAt).getTime();
 }
 
@@ -271,6 +278,31 @@ async function fetchWithFallback(taxCode: string, endpoints: EndpointSettings): 
   }
 }
 
+async function fetchWithPreferredEndpoint(taxCode: string, endpoints: EndpointSettings, preferred: RefreshProvider): Promise<LookupResult> {
+  const first = preferred === "xinvoice"
+    ? () => fetchXInvoice(taxCode, endpoints)
+    : () => fetchVietQr(taxCode, endpoints);
+  const second = preferred === "xinvoice"
+    ? () => fetchVietQr(taxCode, endpoints)
+    : () => fetchXInvoice(taxCode, endpoints);
+
+  try {
+    return await first();
+  } catch (firstError) {
+    try {
+      return await second();
+    } catch (secondError) {
+      const firstMessage = firstError instanceof Error ? firstError.message : "PRIMARY_LOOKUP_FAILED";
+      const secondMessage = secondError instanceof Error ? secondError.message : "FALLBACK_LOOKUP_FAILED";
+      const retryAfterSeconds = Math.max(
+        firstError instanceof RefreshWorkerError ? firstError.retryAfterSeconds ?? 0 : 0,
+        secondError instanceof RefreshWorkerError ? secondError.retryAfterSeconds ?? 0 : 0,
+      );
+      throw new RefreshWorkerError(`${firstMessage}; ${secondMessage}`, retryAfterSeconds || undefined);
+    }
+  }
+}
+
 async function markJobSuccess(taxCode: string) {
   const { error } = await supabase
     .from("refresh_queue")
@@ -297,7 +329,7 @@ async function handleJob(job: RefreshJob, endpoints: EndpointSettings) {
     last_checked_at: now,
   };
 
-  if (isIncomingSourceOlder(normalizedDate(current.source_updated_at), incomingSourceUpdatedAt)) {
+  if (shouldKeepCurrentSource(normalizedDate(current.source_updated_at), incomingSourceUpdatedAt)) {
     // The lookup succeeded, but the provider returned an older snapshot. Keep
     // the current taxpayer data and only record that the lookup was performed.
     const { error: timestampError } = await supabase
@@ -386,6 +418,78 @@ async function handleJob(job: RefreshJob, endpoints: EndpointSettings) {
   return { skipped: false };
 }
 
+async function handleStatusJob(job: RefreshJob, endpoints: EndpointSettings, preferred: RefreshProvider) {
+  const { data: current, error: currentError } = await supabase
+    .from("taxpayers")
+    .select("name, org_type, address, tax_department, status, status_group, source_updated_at, last_checked_at, last_error, consecutive_failures")
+    .eq("tax_code", job.tax_code)
+    .single<CurrentTaxpayer>();
+
+  if (currentError) throw currentError;
+
+  const { payload, provider } = await fetchWithPreferredEndpoint(job.tax_code, endpoints, preferred);
+  const now = new Date().toISOString();
+  const incomingSourceUpdatedAt = normalizedDate(payload.updatedAt);
+
+  if (shouldKeepCurrentSource(normalizedDate(current.source_updated_at), incomingSourceUpdatedAt)) {
+    // The status endpoint succeeded, but its snapshot is older than (or has
+    // no timestamp newer than) the authoritative DB data. Record the check,
+    // but do not overwrite status, history, or the raw authoritative payload.
+    const { error: timestampError } = await supabase
+      .from("taxpayers")
+      .update({
+        previous_checked_at: current.last_checked_at ?? null,
+        last_checked_at: now,
+        last_error: null,
+        consecutive_failures: 0,
+        next_check_at: nextMonthlyRefreshAt(new Date(now)),
+      })
+      .eq("tax_code", job.tax_code);
+
+    if (timestampError) throw timestampError;
+    await markJobSuccess(job.tax_code);
+    return { skipped: true };
+  }
+
+  const nextStatus = payload.status ?? current.status;
+  const nextStatusGroup = statusGroup(nextStatus);
+  const statusChanged = materialStatusChanged(current.status, current.status_group, nextStatus, nextStatusGroup);
+
+  if (statusChanged) {
+    const { error: historyError } = await supabase.from("taxpayer_status_history").insert({
+      tax_code: job.tax_code,
+      old_status: current.status,
+      new_status: nextStatus,
+      old_status_group: current.status_group,
+      new_status_group: nextStatusGroup,
+      detected_at: now,
+      source_updated_at: current.source_updated_at,
+      note: `Status change detected by status-only ${provider} refresh`,
+    });
+    if (historyError) throw historyError;
+  }
+
+  const { error: updateError } = await supabase
+    .from("taxpayers")
+    .update({
+      previous_checked_at: current.last_checked_at ?? null,
+      last_checked_at: now,
+      status: nextStatus,
+      status_group: nextStatusGroup,
+      status_changed_at: statusChanged ? now : undefined,
+      last_error: null,
+      consecutive_failures: 0,
+      next_check_at: nextMonthlyRefreshAt(new Date(now)),
+      raw_current_response: { provider, payload, refresh_mode: "status" },
+    })
+    .eq("tax_code", job.tax_code);
+
+  if (updateError) throw updateError;
+
+  await markJobSuccess(job.tax_code);
+  return { skipped: false };
+}
+
 function retryDelay(attempts: number) {
   return Math.min(60 * 2 ** Math.max(0, attempts - 1), 3600);
 }
@@ -417,6 +521,9 @@ Deno.serve(async (request) => {
     : [];
   if (Array.isArray(body.taxCodes) && (body.taxCodes.length !== requestedTaxCodes.length || !requestedTaxCodes.length || requestedTaxCodes.some((taxCode) => !isValidTaxCode(taxCode)))) {
     return new Response(JSON.stringify({ error: "Invalid tax code list" }), { status: 400, headers: { "content-type": "application/json" } });
+  }
+  if (body.refreshMode && body.refreshMode !== "data" && body.refreshMode !== "status") {
+    return new Response(JSON.stringify({ error: "Invalid refresh mode" }), { status: 400, headers: { "content-type": "application/json" } });
   }
 
   // Preview is used while adding a new MST. It intentionally does not claim
@@ -456,26 +563,29 @@ Deno.serve(async (request) => {
     }
   }
 
+  const statusOnly = body.refreshMode === "status" && !requestedTaxCode && !requestedTaxCodes.length;
+  const batchLimit = statusOnly ? 20 : 10;
   const { data: jobs, error: claimError } = requestedTaxCode
     ? await supabase.rpc("claim_refresh_job", { p_tax_code: requestedTaxCode })
-    : requestedTaxCodes.length
-      ? await supabase.rpc("claim_refresh_jobs", { p_tax_codes: requestedTaxCodes, p_limit: 10 })
-      : await supabase.rpc("claim_refresh_batch", { p_limit: 10 });
+      : requestedTaxCodes.length
+        ? await supabase.rpc("claim_refresh_jobs", { p_tax_codes: requestedTaxCodes, p_limit: 10 })
+      : await supabase.rpc("claim_refresh_batch", { p_limit: batchLimit });
   if (claimError) {
     return new Response(JSON.stringify({ error: claimError.message }), { status: 500, headers: { "content-type": "application/json" } });
   }
 
-  const results: Array<{ tax_code: string; ok: boolean; error?: string; skipped?: boolean; skipReason?: string }> = [];
   const endpointSettings = await loadEndpointSettings();
 
-  for (const job of (jobs ?? []) as RefreshJob[]) {
+  const processJob = async (job: RefreshJob, index: number) => {
     try {
-      const result = await handleJob(job, endpointSettings);
-      results.push({
+      const result = statusOnly
+        ? await handleStatusJob(job, endpointSettings, index < 10 ? "xinvoice" : "vietqr")
+        : await handleJob(job, endpointSettings);
+      return {
         tax_code: job.tax_code,
         ok: true,
-        ...(result.skipped ? { skipped: true, skipReason: "endpoint_older_than_db" } : {}),
-      });
+        ...(result.skipped ? { skipped: true, skipReason: "endpoint_not_newer_than_db" } : {}),
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown worker error";
       const rateLimitMatch = message.match(/^RATE_LIMIT:(\d+)$/);
@@ -496,9 +606,11 @@ Deno.serve(async (request) => {
         last_error: message.slice(0, 500),
         consecutive_failures: job.attempts + 1,
       }).eq("tax_code", job.tax_code);
-      results.push({ tax_code: job.tax_code, ok: false, error: message });
+      return { tax_code: job.tax_code, ok: false, error: message };
     }
-  }
+  };
+
+  const results = await Promise.all((jobs ?? []).map((job, index) => processJob(job as RefreshJob, index)));
 
   return new Response(JSON.stringify({ processed: results.length, results }), {
     headers: { "content-type": "application/json" },

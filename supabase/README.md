@@ -7,9 +7,11 @@ migration adds the previous-check timestamp, yearly source index and the
 service-role refresh request function used by the Vercel API. The third keeps
 the older due-date helper for compatibility. The fourth adds targeted claims
 and the monthly dispatcher. The fifth ensures retry jobs are not starved by
-the initial backfill queue. The eighth disables the old scheduled refresh
-jobs; refreshes are now started manually from the application. The ninth adds
-legacy short-lived server-side sessions for the previous Cục Thuế CAPTCHA flow.
+the initial backfill queue. The eighth disables the old scheduled refresh jobs.
+Migration `202608140017_server_side_refresh_scheduler.sql` restores the
+minute-level background queue drain while keeping full refresh
+start/pause/resume under application control. The ninth adds legacy short-lived
+server-side sessions for the previous Cục Thuế CAPTCHA flow.
 The invoice migrations add provider-specific lookup URL and lookup code fields;
 the current invoice UI opens those provider pages because each provider can use
 a different CAPTCHA mechanism.
@@ -60,13 +62,35 @@ uses the dedicated `x-refresh-secret` header:
 supabase functions deploy xinvoice-refresh --no-verify-jwt
 ```
 
-Run migration `202608130008_manual_refresh_only.sql` (or `cron.sql`) to remove
-the old scheduled jobs. Refreshes are started manually from the application:
-the overview button queues the full catalogue and drains it in batches, while
-the row button sends a targeted `taxCode` request. Excel import sends only the
-new MST codes from the workbook through targeted batches. The worker claims at
-most ten batch rows per invocation and uses retry/backoff. It must not be
-configured to bypass XInvoice limits or use rotating proxies.
+Run migration `202608130008_manual_refresh_only.sql` before
+`202608140017_server_side_refresh_scheduler.sql`. The latter restores only the
+minute-level queue drain: the application still starts a full refresh manually,
+while Supabase Cron invokes the worker in the background. The pause flag is
+stored in `app_settings`, so the queue position survives browser close, network
+loss and deploys. The row button and Excel import continue to use targeted
+worker requests. A full status refresh claims up to twenty rows per invocation
+and sends ten through each configured endpoint; targeted worker requests remain
+limited to ten rows. Before a response is applied, the worker compares its
+`updatedAt` with `taxpayers.source_updated_at`; an older or undated endpoint
+snapshot is recorded as checked but cannot overwrite newer DB data. Both modes
+use retry/backoff. It must not be configured to bypass XInvoice limits or use
+rotating proxies.
+
+### Cron Vault setup
+
+Migration `202608140017_server_side_refresh_scheduler.sql` deliberately does
+not contain deployment secrets. Before the scheduled drain can call the Edge
+Function, create these two Supabase Vault secrets once in the SQL Editor using
+the real project URL and the same `REFRESH_WORKER_SECRET` configured on the
+`xinvoice-refresh` Edge Function:
+
+```sql
+select vault.create_secret('https://<project-ref>.supabase.co', 'project_url');
+select vault.create_secret('<REFRESH_WORKER_SECRET>', 'refresh_worker_secret');
+```
+
+If a secret already exists, update it in the Supabase Vault UI instead of
+creating a duplicate. Do not commit either value to Git.
 
 ## Taxpayer Excel import
 
