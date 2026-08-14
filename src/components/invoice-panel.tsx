@@ -449,19 +449,19 @@ function InvoiceVerificationDialog({
   onSave: () => void;
   onRecord: (status: "valid" | "invalid") => void;
 }) {
-  const [isCopied, setIsCopied] = useState(false);
+  const [copiedField, setCopiedField] = useState<"sellerTaxCode" | "lookupCode" | null>(null);
   const updateField = (field: "lookupUrl" | "lookupCode", value: string) => onChange({ ...state, [field]: value, error: null });
   const lookupUrl = safeExternalLookupUrl(state.lookupUrl);
   const canRecord = Boolean(lookupUrl && state.lookupCode.trim());
 
-  async function copyLookupCode() {
-    if (!state.lookupCode.trim()) return;
+  async function copyValue(field: "sellerTaxCode" | "lookupCode", value: string) {
+    if (!value.trim()) return;
     try {
-      await navigator.clipboard.writeText(state.lookupCode.trim());
-      setIsCopied(true);
-      window.setTimeout(() => setIsCopied(false), 1800);
+      await navigator.clipboard.writeText(value.trim());
+      setCopiedField(field);
+      window.setTimeout(() => setCopiedField((current) => current === field ? null : current), 1800);
     } catch {
-      onChange({ ...state, error: "Không thể sao chép mã tra cứu. Bạn có thể bôi đen và sao chép thủ công." });
+      onChange({ ...state, error: "Không thể sao chép thông tin. Bạn có thể bôi đen và sao chép thủ công." });
     }
   }
 
@@ -473,8 +473,9 @@ function InvoiceVerificationDialog({
       <div className="invoice-prefill-grid">
         <InvoicePrefill label="Số hóa đơn" value={state.invoice.invoice_number} mono />
         <InvoicePrefill label="Nhà cung cấp" value={state.invoice.seller_name ?? "—"} />
+        <InvoiceCopyPrefill label="MST bên bán" value={state.invoice.seller_tax_code ?? ""} mono copied={copiedField === "sellerTaxCode"} onCopy={() => void copyValue("sellerTaxCode", state.invoice.seller_tax_code ?? "")} />
         <label className="invoice-prefill invoice-prefill-editable"><span>Địa chỉ trang tra cứu</span><input value={state.lookupUrl} onChange={(event) => updateField("lookupUrl", event.target.value)} disabled={state.isSubmitting} placeholder="https://..." inputMode="url" /></label>
-        <label className="invoice-prefill invoice-prefill-editable"><span>Mã tra cứu</span><div className="invoice-code-input"><input value={state.lookupCode} onChange={(event) => updateField("lookupCode", event.target.value)} disabled={state.isSubmitting} placeholder="Mã tra cứu trên hóa đơn" /><button className="icon-button" type="button" aria-label="Sao chép mã tra cứu" title={isCopied ? "Đã sao chép" : "Sao chép mã tra cứu"} disabled={!state.lookupCode.trim() || state.isSubmitting} onClick={() => void copyLookupCode()}>{isCopied ? <CheckCircle size={16} /> : <Copy size={16} />}</button></div></label>
+        <label className="invoice-prefill invoice-prefill-editable"><span>Mã tra cứu</span><div className="invoice-code-input"><input value={state.lookupCode} onChange={(event) => updateField("lookupCode", event.target.value)} disabled={state.isSubmitting} placeholder="Mã tra cứu trên hóa đơn" /><button className="icon-button" type="button" aria-label="Sao chép mã tra cứu" title={copiedField === "lookupCode" ? "Đã sao chép" : "Sao chép mã tra cứu"} disabled={!state.lookupCode.trim() || state.isSubmitting} onClick={() => void copyValue("lookupCode", state.lookupCode)}>{copiedField === "lookupCode" ? <CheckCircle size={16} /> : <Copy size={16} />}</button></div></label>
       </div>
       <div className="invoice-provider-actions">
         {lookupUrl ? <a className="outline-button invoice-provider-link" href={lookupUrl} target="_blank" rel="noreferrer"><ArrowSquareOut size={15} /> Mở trang tra cứu</a> : <button className="outline-button invoice-provider-link" type="button" disabled><ArrowSquareOut size={15} /> Mở trang tra cứu</button>}
@@ -489,4 +490,20 @@ function InvoiceVerificationDialog({
 
 function InvoicePrefill({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return <div className="invoice-prefill"><span>{label}</span><strong className={mono ? "mono-value" : ""}>{value || "—"}</strong></div>;
+}
+
+function InvoiceCopyPrefill({
+  label,
+  value,
+  mono = false,
+  copied,
+  onCopy,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  copied: boolean;
+  onCopy: () => void;
+}) {
+  return <div className="invoice-prefill"><span>{label}</span><div className="invoice-copy-value"><strong className={mono ? "mono-value" : ""}>{value || "—"}</strong><button className="icon-button" type="button" aria-label={"Sao chép " + label} title={copied ? "Đã sao chép" : "Sao chép " + label} disabled={!value} onClick={onCopy}>{copied ? <CheckCircle size={16} /> : <Copy size={16} />}</button></div></div>;
 }

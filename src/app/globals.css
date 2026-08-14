@@ -339,6 +339,9 @@ button:not(:disabled):active { transform: translateY(1px); }
 .invoice-code-input { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .invoice-code-input input { flex: 1; }
 .invoice-code-input .icon-button { flex: 0 0 31px; width: 31px; height: 31px; }
+.invoice-copy-value { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.invoice-copy-value strong { flex: 1; min-width: 0; }
+.invoice-copy-value .icon-button { flex: 0 0 31px; width: 31px; height: 31px; }
 .invoice-verification-dialog { width: min(100%, 610px); max-height: min(92dvh, 760px); overflow-y: auto; }
 .invoice-provider-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 16px; }
 .invoice-provider-actions > * { flex: 1 1 210px; }
