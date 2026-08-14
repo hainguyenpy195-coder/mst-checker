@@ -15,6 +15,7 @@ import {
   Play,
   Plus,
   Receipt,
+  ShoppingCart,
   SignOut,
   SquaresFour,
   Table,
@@ -27,6 +28,7 @@ import { isValidTaxCode, normalizeTaxCode, TAX_CODE_FORMAT_HINT, TAX_CODE_INPUT_
 import { formatTaxpayerUnitHeading, getTaxpayerUnitDisplayName, getTaxpayerUnitOrder } from "@/lib/taxpayer-units";
 import type { AppRole } from "@/lib/app-auth";
 import InvoicePanel from "@/components/invoice-panel";
+import PurchaseInvoicePanel from "@/components/purchase-invoice-panel";
 import TaxpayerExcelImportModal from "@/components/taxpayer-excel-import-modal";
 
 const DEFAULT_YEARS = ["2023", "2024", "2025", "2026"];
@@ -411,7 +413,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
 
   function navigateToView(nextView: ViewMode, year?: string) {
     setError(null);
-    if (nextView === "activity" || nextView === "invoices" || nextView === "settings") {
+    if (nextView === "activity" || nextView === "invoices" || nextView === "purchases" || nextView === "settings") {
       closeAddForm();
       setShowImportModal(false);
     }
@@ -513,7 +515,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
 
   useEffect(() => {
     if (viewMode === "activity") void loadActivity();
-    else if (viewMode !== "settings") void loadData();
+    else if (viewMode === "overview" || viewMode === "sheets") void loadData();
     return () => dataLoadController.current?.abort();
     // The active year is the intended refresh boundary for this dashboard.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1156,6 +1158,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
     { label: "Tổng hợp", icon: SquaresFour, mode: "overview" as ViewMode },
     { label: "Theo năm", icon: Table, mode: "sheets" as ViewMode },
     { label: "Hóa đơn", icon: Receipt, mode: "invoices" as ViewMode },
+    { label: "Mua vào", icon: ShoppingCart, mode: "purchases" as ViewMode },
     { label: "Lịch sử", icon: ClockCounterClockwise, mode: "activity" as ViewMode },
   ];
   return (
@@ -1204,7 +1207,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
         <main className="dashboard-content">
           <div className={`page-heading-row ${isDataView ? "desktop-page-heading" : ""}`}>
             <div>
-              <h1>{viewMode === "overview" ? "Bảng tổng hợp" : viewMode === "sheets" ? "Danh sách MST năm " + selectedYear : viewMode === "invoices" ? "Hóa đơn" : viewMode === "activity" ? "Lịch sử thao tác" : "Cấu hình"}</h1>
+              <h1>{viewMode === "overview" ? "Bảng tổng hợp" : viewMode === "sheets" ? "Danh sách MST năm " + selectedYear : viewMode === "invoices" ? "Hóa đơn" : viewMode === "purchases" ? "Mua vào" : viewMode === "activity" ? "Lịch sử thao tác" : "Cấu hình"}</h1>
             </div>
             {viewMode === "overview" || viewMode === "sheets" ? <div className="heading-actions">
               {canWrite ? <button className="outline-button" type="button" onClick={toggleAddForm} disabled={isRefreshingAll}><Plus size={17} /> Thêm MST</button> : null}
@@ -1222,6 +1225,8 @@ export default function Dashboard({ username, role }: DashboardProps) {
           {viewMode === "activity" ? <ActivityPanel rows={activityRows} isLoading={isActivityLoading} error={activityError} /> : null}
 
           {viewMode === "invoices" ? <InvoicePanel role={role} /> : null}
+
+          {viewMode === "purchases" ? <PurchaseInvoicePanel role={role} /> : null}
 
           {isDataView ? <>
           <MobileLookupPanel

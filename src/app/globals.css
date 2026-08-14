@@ -420,6 +420,7 @@ button:not(:disabled):active { transform: translateY(1px); }
 .invoice-taxpayer-inactive, .invoice-taxpayer-error { color: var(--danger); background: var(--danger-soft); border-color: var(--danger-border); }
 .invoice-taxpayer-pending { color: var(--warning); background: var(--warning-soft); border-color: var(--warning-border); }
 .invoice-taxpayer-unknown { color: var(--muted); background: var(--surface-soft); border-color: var(--line); }
+.purchase-taxpayer-missing { color: var(--warning); background: var(--warning-soft); border-color: var(--warning-border); }
 .invoice-verify-button { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 0 8px; color: var(--accent-dark); background: var(--accent-soft); border: 1px solid var(--accent-border); border-radius: 8px; font-size: 10px; font-weight: 700; white-space: nowrap; }
 .invoice-verify-button:hover:not(:disabled) { color: #ffffff; background: var(--accent); border-color: var(--accent); }
 .invoice-verify-button:disabled { color: var(--muted); background: var(--surface-soft); border-color: var(--line); }
@@ -447,6 +448,14 @@ button:not(:disabled):active { transform: translateY(1px); }
 .invoice-provider-link { text-decoration: none; }
 .invoice-verification-actions { flex-wrap: wrap; }
 .invoice-tax-note { color: var(--muted) !important; font-size: 11px !important; line-height: 1.5 !important; }
+.purchase-intro-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+.purchase-intro-actions > .outline-button { white-space: nowrap; }
+.purchase-toolbar-tools { align-items: flex-end; }
+.purchase-date-range { display: flex; align-items: flex-end; gap: 8px; }
+.purchase-date-filter { display: grid; gap: 4px; color: var(--muted); font-size: 10px; font-weight: 650; }
+.purchase-date-filter input { min-width: 136px; min-height: 36px; padding: 0 9px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-control); outline: 0; font: inherit; font-size: 12px; }
+.purchase-date-filter input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.purchase-date-hint { padding-bottom: 10px; color: var(--muted); font-size: 10px; white-space: nowrap; }
 
 /* Mobile-only views are mounted with the dashboard so they can reuse its state. */
 .mobile-dashboard, .mobile-activity-list { display: none; }
@@ -551,6 +560,8 @@ button:not(:disabled):active { transform: translateY(1px); }
   .taxpayer-import-invalid-row > span:last-child { grid-column: 1 / -1; }
   .invoice-intro { flex-direction: column; padding: 19px; }
   .invoice-quota { width: 100%; }
+  .purchase-intro-actions { width: 100%; align-items: stretch; flex-direction: column; }
+  .purchase-intro-actions > .outline-button { width: 100%; }
   .invoice-import-card { padding: 18px 16px; }
   .invoice-import-actions { justify-content: stretch; }
   .invoice-import-actions > button { flex: 1; }
@@ -560,6 +571,10 @@ button:not(:disabled):active { transform: translateY(1px); }
   .invoice-table-section .table-toolbar { align-items: stretch; flex-direction: column; padding: 18px 16px 15px; }
   .invoice-table-section .toolbar-tools { flex-direction: column; align-items: stretch; }
   .invoice-table-section .table-search { width: 100%; }
+  .purchase-date-range { width: 100%; }
+  .purchase-date-filter { flex: 1; }
+  .purchase-date-filter input { width: 100%; min-width: 0; }
+  .purchase-date-hint { padding-bottom: 0; }
   .invoice-prefill-grid { grid-template-columns: 1fr 1fr; }
 }
 

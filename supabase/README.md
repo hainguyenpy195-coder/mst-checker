@@ -114,6 +114,27 @@ to the private
 session ID. A completed workbook import is also recorded as an
 `excel_imported` event in `taxpayer_activity_logs`.
 
+## Purchase invoice Excel import
+
+Run `202608150001_purchase_invoices.sql` after the earlier migrations before
+using the **Mua vào** menu. The administrator uploads `.xlsx` files directly
+to the private `purchase-invoice-imports` bucket; the application then parses,
+previews, and commits the rows in batches. Sheet names are not fixed. A sheet
+is recognised from its purchase-invoice headers (`STT`, invoice number, issue
+date, seller MST, and pre-tax purchase value). If several sheets match, the
+one with the most populated seller MSTs is selected, so the original source is
+preferred over a manually filtered-MST copy.
+
+Each worksheet accounting row is preserved. The comparison key made from MST,
+symbol, invoice number, issue date, and pre-tax amount is retained for
+reference but is deliberately not unique: rows of the same invoice can have
+different tax rates or accounting entries. Re-import protection uses a
+fingerprint of the complete accounting row, so only an identical row already
+in the database is skipped. A valid seller MST that does not exist in the
+`taxpayers` catalogue is shown as **MST chưa có trên CSDL**; the import does
+not create or refresh taxpayer records automatically. The Mua vào table filters
+by inclusive invoice issue-date range and displays dates as `dd/MM/yyyy`.
+
 Hosted Edge Functions provide `SUPABASE_SECRET_KEYS` as a JSON dictionary and
 the worker reads its `default` entry. It also accepts the singular
 `SUPABASE_SECRET_KEY` for local/server runtimes and the legacy
