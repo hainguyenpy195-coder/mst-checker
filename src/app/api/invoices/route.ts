@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { authenticateRequest } from "@/lib/app-auth";
 import { INVOICE_SELECT, getVietnamMonthStart } from "@/lib/invoice-db";
-import { deriveInvoiceTemplateNumber } from "@/lib/invoice-extraction";
+import { normalizeInvoiceTemplateAndSymbol } from "@/lib/invoice-extraction";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { InvoiceRecord, InvoiceVerificationStatus } from "@/lib/invoice-types";
 
@@ -61,9 +61,9 @@ export async function GET(request: Request) {
   const limit = usageResult.data?.monthly_limit ?? Number(process.env.INVOICE_MONTHLY_SCAN_LIMIT ?? 200);
   const total = invoiceResult.count ?? 0;
   const rows = ((invoiceResult.data ?? []) as unknown as InvoiceRecord[]).map((row) => {
-    const derivedTemplate = deriveInvoiceTemplateNumber(row.invoice_symbol);
-    return !row.invoice_template_number && derivedTemplate
-      ? { ...row, invoice_template_number: derivedTemplate }
+    const identity = normalizeInvoiceTemplateAndSymbol(row.invoice_template_number, row.invoice_symbol);
+    return identity.templateNumber !== row.invoice_template_number || identity.symbol !== row.invoice_symbol
+      ? { ...row, invoice_template_number: identity.templateNumber, invoice_symbol: identity.symbol }
       : row;
   });
   return NextResponse.json({

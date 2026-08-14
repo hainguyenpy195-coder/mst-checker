@@ -114,19 +114,36 @@ function cleanOptionalText(value: string | null | undefined) {
   return normalized;
 }
 
-export function normalizeInvoiceSymbol(value: string | null) {
+export function normalizeInvoiceSymbol(value: string | null | undefined) {
   const normalized = (value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
   return cleanOptionalText(normalized);
 }
 
+export function normalizeInvoiceTemplateAndSymbol(templateNumber: string | null | undefined, symbol: string | null | undefined) {
+  const storedTemplate = cleanOptionalText(templateNumber);
+  const normalizedSymbol = normalizeInvoiceSymbol(symbol);
+  const compactSymbol = normalizedSymbol?.replace(/\s+/g, "").toLocaleUpperCase("vi-VN") ?? "";
+  const combinedMatch = compactSymbol.match(/^([1-9])([A-Z]\d{2}[A-Z0-9]{3})$/u);
+
+  if (combinedMatch && (!storedTemplate || storedTemplate === combinedMatch[1])) {
+    return {
+      templateNumber: storedTemplate ?? combinedMatch[1],
+      symbol: combinedMatch[2],
+    };
+  }
+
+  return {
+    templateNumber: storedTemplate,
+    symbol: normalizedSymbol,
+  };
+}
+
 /**
- * For electronic invoices, the first digit of the six-character invoice
- * symbol is the invoice template number. Example: 1K26DAB -> template 1.
- * Some telecom invoices do not print a separate "Mẫu số" line.
+ * Some electronic invoices print the template number and invoice symbol as
+ * one seven-character value. Example: 1K26DAB -> template 1 + symbol K26DAB.
  */
 export function deriveInvoiceTemplateNumber(symbol: string | null | undefined) {
-  const normalized = (symbol ?? "").normalize("NFKC").replace(/\s+/g, "").trim();
-  return normalized.match(/^([1-9])/u)?.[1] ?? null;
+  return normalizeInvoiceTemplateAndSymbol(null, symbol).templateNumber;
 }
 
 export function parseInvoiceAmount(value: string | number | null | undefined): number | null {
@@ -165,7 +182,7 @@ function extractionPrompt(fileName: string, kind: InvoiceFileDescriptor["kind"])
     "Bạn là bộ phận kiểm tra hóa đơn điện tử tại Việt Nam.",
     "Đọc chính xác nội dung hóa đơn trong file đính kèm, không suy đoán và không tự điền dữ liệu không nhìn thấy.",
     "Trích xuất các trường: mã số thuế người bán, tên người bán, mẫu số, ký hiệu hóa đơn, số hóa đơn, ngày hóa đơn, tiền thuế, tổng tiền thanh toán, loại tiền tệ.",
-    "Theo quy tắc ký hiệu hóa đơn điện tử, ký tự số đầu tiên của ký hiệu là mẫu số. Ví dụ ký hiệu 1K26DAB thì mẫu số là 1, kể cả hóa đơn không in riêng dòng Mẫu số.",
+    "Một số hóa đơn in chung trường Mẫu số/Ký hiệu, ví dụ 1C26MCM hoặc 1K26DAB. Hãy tách ký tự số đầu tiên thành mẫu số (1), phần còn lại thành ký hiệu (C26MCM hoặc K26DAB). Nếu chỉ in Ký hiệu nhưng có dạng 1K26DAB thì cũng tách theo quy tắc này.",
     "Số hóa đơn phải giữ nguyên các số 0 ở đầu. Các khoản tiền trả về dạng số, không có dấu phân cách.",
     "extracted_text phải là phần text nhìn thấy trên hóa đơn, trình bày ngắn gọn nhưng đủ để kiểm tra lại.",
     "Nếu không thấy trường nào thì trả về null. Chỉ trả về dữ liệu theo schema structured output.",
@@ -207,16 +224,15 @@ export async function extractInvoiceFromFile(options: {
 
 export function normalizeExtractedInvoice(extraction: InvoiceExtraction) {
   const invoiceNumber = cleanOptionalText(extraction.invoice_number);
-  const invoiceSymbol = normalizeInvoiceSymbol(extraction.invoice_symbol);
   const sellerTaxCode = cleanOptionalText(extraction.seller_tax_code);
-  const invoiceTemplateNumber = cleanOptionalText(extraction.invoice_template_number) ?? deriveInvoiceTemplateNumber(invoiceSymbol);
+  const identity = normalizeInvoiceTemplateAndSymbol(extraction.invoice_template_number, extraction.invoice_symbol);
   return {
     invoice_number: invoiceNumber,
     invoice_number_key: invoiceNumber ? normalizeInvoiceNumber(invoiceNumber) : null,
     seller_tax_code: sellerTaxCode ? normalizeTaxCode(sellerTaxCode) : null,
     seller_name: cleanOptionalText(extraction.seller_name),
-    invoice_template_number: invoiceTemplateNumber,
-    invoice_symbol: invoiceSymbol,
+    invoice_template_number: identity.templateNumber,
+    invoice_symbol: identity.symbol,
     invoice_date: cleanOptionalText(extraction.invoice_date),
     tax_amount: extraction.tax_amount,
     total_amount: extraction.total_amount,

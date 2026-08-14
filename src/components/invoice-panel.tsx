@@ -86,10 +86,17 @@ function formatFileSize(value: number) {
   return (value / (1024 * 1024)).toFixed(2) + " MB";
 }
 
-function effectiveTemplateNumber(invoice: Pick<InvoiceRecord, "invoice_template_number" | "invoice_symbol">) {
-  const stored = invoice.invoice_template_number?.trim();
-  if (stored && !/^(?:—|-|null)$/i.test(stored)) return stored;
-  return invoice.invoice_symbol?.trim().match(/^([1-9])/u)?.[1] ?? null;
+function effectiveInvoiceIdentity(invoice: Pick<InvoiceRecord, "invoice_template_number" | "invoice_symbol">) {
+  const storedTemplate = invoice.invoice_template_number?.trim();
+  const rawSymbol = invoice.invoice_symbol?.replace(/\s+/g, "").trim().toLocaleUpperCase("vi-VN") ?? "";
+  const combinedMatch = rawSymbol.match(/^([1-9])([A-Z]\d{2}[A-Z0-9]{3})$/u);
+  if (combinedMatch && (!storedTemplate || storedTemplate === combinedMatch[1])) {
+    return { templateNumber: storedTemplate ?? combinedMatch[1], symbol: combinedMatch[2] };
+  }
+  return {
+    templateNumber: storedTemplate && !/^(?:—|-|null)$/i.test(storedTemplate) ? storedTemplate : null,
+    symbol: rawSymbol || null,
+  };
 }
 
 function statusLabel(status: InvoiceVerificationStatus) {
@@ -406,15 +413,15 @@ type InvoiceTableRowProps = {
 
 const InvoiceTableRow = memo(function InvoiceTableRow({ invoice, isBusy, onVerify }: InvoiceTableRowProps) {
   const status = statusLabel(invoice.verification_status);
-  const templateNumber = effectiveTemplateNumber(invoice);
-  const canVerify = Boolean(invoice.seller_tax_code && templateNumber && invoice.invoice_symbol && invoice.invoice_number);
+  const identity = effectiveInvoiceIdentity(invoice);
+  const canVerify = Boolean(invoice.seller_tax_code && identity.templateNumber && identity.symbol && invoice.invoice_number);
   return <tr className="data-row invoice-data-row">
     <td className="invoice-number-cell">
-      <div className="invoice-number-action"><strong>{invoice.invoice_number}</strong><button className="invoice-verify-button" type="button" disabled={!canVerify || isBusy} title={canVerify ? "Đối chiếu với Cục Thuế" : "Thiếu MST, ký hiệu, số hóa đơn hoặc không suy ra được mẫu số"} onClick={() => onVerify(invoice)}><ShieldCheck size={15} /> {isBusy ? "Đang mở" : "Đối chiếu"}</button></div>
+      <div className="invoice-number-action"><strong>{invoice.invoice_number}</strong><button className="invoice-verify-button" type="button" disabled={!canVerify || isBusy} title={canVerify ? "Đối chiếu với Cục Thuế" : "Thiếu MST, mẫu số/ký hiệu hoặc số hóa đơn"} onClick={() => onVerify(invoice)}><ShieldCheck size={15} /> {isBusy ? "Đang mở" : "Đối chiếu"}</button></div>
       {invoice.verification_message ? <small title={invoice.verification_message}>{invoice.verification_message}</small> : null}
     </td>
     <td><strong>{invoice.seller_name ?? "Chưa có tên"}</strong><small className="mono-value">{invoice.seller_tax_code ?? "Chưa có MST"}</small></td>
-    <td><span>{invoice.invoice_symbol ?? "—"}</span><small>Mẫu {templateNumber ?? "—"}{!invoice.invoice_template_number && templateNumber ? " · suy ra" : ""}</small></td>
+    <td><span>{identity.templateNumber && identity.symbol ? identity.templateNumber + identity.symbol : identity.symbol ?? "—"}</span><small>Mẫu {identity.templateNumber ?? "—"} · Ký hiệu {identity.symbol ?? "—"}</small></td>
     <td className="amount-cell">{formatAmount(invoice.tax_amount)}</td>
     <td className="amount-cell">{formatAmount(invoice.total_amount)}</td>
     <td><span className={status.className}>{status.label}</span></td>
