@@ -116,7 +116,7 @@ function findColumn(header, patterns) {
   });
 }
 
-const UNIT_MARKER_PATTERN = /^(?:I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII|XVIII|XIX|XX)\.?$/i;
+const UNIT_MARKER_PATTERN = /^(?:I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII|XVIII|XIX|XX)(?:\.\s*\d+)?\.?$/i;
 const UNIT_DEFINITIONS = new Map([
   ["xuong dvkt", { key: "xuong-dvkt", order: 1 }],
   ["xuong dich vu ky thuat", { key: "xuong-dvkt", order: 1 }],
@@ -127,6 +127,7 @@ const UNIT_DEFINITIONS = new Map([
   ["phong tccbld", { key: "phong-tccbld", order: 6 }],
   ["tt huan luyen cns", { key: "tt-huan-luyen-cns", order: 7 }],
   ["vpct", { key: "vpct", order: 8 }],
+  ["vpct chinh", { key: "vpct", order: 8 }],
 ]);
 
 function normalizeUnitLabel(value) {
@@ -139,19 +140,6 @@ function normalizeUnitLabel(value) {
     .trim();
 }
 
-function romanNumeralToNumber(value) {
-  const roman = text(value).replace(/\.$/, "").toUpperCase();
-  const values = { I: 1, V: 5, X: 10, L: 50, C: 100 };
-  let total = 0;
-  let previous = 0;
-  for (const character of [...roman].reverse()) {
-    const current = values[character] ?? 0;
-    total += current < previous ? -current : current;
-    previous = current;
-  }
-  return total > 0 ? total : null;
-}
-
 function resolveSourceUnit(marker, label) {
   const sourceLabel = text(label);
   const definition = UNIT_DEFINITIONS.get(normalizeUnitLabel(sourceLabel));
@@ -160,7 +148,8 @@ function resolveSourceUnit(marker, label) {
   return {
     key,
     label: sourceLabel,
-    order: definition?.order ?? romanNumeralToNumber(marker),
+    marker: text(marker),
+    order: definition?.order ?? null,
   };
 }
 
@@ -191,6 +180,7 @@ function parseSheet(dbYear, worksheet) {
   const units = new Map();
   const issues = [];
   let currentUnit = null;
+  let nextUnitOrder = 0;
 
   rows.slice(headerIndex + 1).forEach((row, offset) => {
     const sourceRow = headerIndex + offset + 2;
@@ -199,12 +189,17 @@ function parseSheet(dbYear, worksheet) {
     const vendorName = nameColumn >= 0 ? text(row[nameColumn]) : "";
 
     if (UNIT_MARKER_PATTERN.test(text(row[0])) && text(row[1]) && !taxCode) {
-      currentUnit = resolveSourceUnit(row[0], row[1]);
+      const resolvedUnit = resolveSourceUnit(row[0], row[1]);
+      const unitIdentity = `${resolvedUnit.key}:${resolvedUnit.marker}`;
+      const existingUnit = units.get(unitIdentity);
+      const unitOrder = existingUnit?.sourceUnitOrder ?? (++nextUnitOrder);
+      currentUnit = { ...resolvedUnit, order: unitOrder };
       if (currentUnit.order) {
-        units.set(currentUnit.key, {
+        units.set(unitIdentity, {
           sourceYear: dbYear,
           sourceUnitKey: currentUnit.key,
           sourceUnitLabel: currentUnit.label,
+          sourceUnitMarker: currentUnit.marker,
           sourceUnitOrder: currentUnit.order,
         });
       }
@@ -226,6 +221,7 @@ function parseSheet(dbYear, worksheet) {
       sourceRow,
       sourceUnitKey: currentUnit?.key ?? null,
       sourceUnitLabel: currentUnit?.label ?? null,
+      sourceUnitMarker: currentUnit?.marker ?? null,
       sourceUnitOrder: currentUnit?.order ?? null,
       vendorName,
       orgType: orgTypeColumn >= 0 ? text(row[orgTypeColumn]) : "",
@@ -254,7 +250,7 @@ async function createSql(inputPath, outputPath) {
     }
     const parsed = parseSheet(target.dbYear, worksheet);
     allRecords.push(...parsed.records);
-    for (const unit of parsed.units) allUnits.set(`${unit.sourceYear}:${unit.sourceUnitKey}`, unit);
+    for (const unit of parsed.units) allUnits.set(`${unit.sourceYear}:${unit.sourceUnitKey}:${unit.sourceUnitMarker}`, unit);
     allIssues.push(...parsed.issues);
   }
 
@@ -275,7 +271,7 @@ async function createSql(inputPath, outputPath) {
 
   for (const unit of [...allUnits.values()].sort((left, right) => Number(left.sourceYear) - Number(right.sourceYear) || left.sourceUnitOrder - right.sourceUnitOrder)) {
     lines.push(
-      `insert into public.taxpayer_source_units (source_year, source_unit_key, source_unit_label, source_unit_order) values (${sqlText(unit.sourceYear)}, ${sqlText(unit.sourceUnitKey)}, ${sqlText(unit.sourceUnitLabel)}, ${unit.sourceUnitOrder}) on conflict (source_year, source_unit_key) do update set source_unit_label = excluded.source_unit_label, source_unit_order = excluded.source_unit_order, updated_at = now();`,
+      `insert into public.taxpayer_source_units (source_year, source_unit_key, source_unit_label, source_unit_marker, source_unit_order) values (${sqlText(unit.sourceYear)}, ${sqlText(unit.sourceUnitKey)}, ${sqlText(unit.sourceUnitLabel)}, ${sqlText(unit.sourceUnitMarker)}, ${unit.sourceUnitOrder}) on conflict (source_year, source_unit_key, source_unit_marker) do update set source_unit_label = excluded.source_unit_label, source_unit_order = excluded.source_unit_order, updated_at = now();`,
     );
   }
 
@@ -289,7 +285,7 @@ async function createSql(inputPath, outputPath) {
 
   for (const record of allRecords) {
     lines.push(
-      `insert into public.taxpayer_sources (tax_code, source_sheet, source_year, source_row, source_unit_key, source_unit_label, source_unit_order, source_vendor_name, source_note) values (${sqlText(record.taxCode)}, ${sqlText(record.sourceSheet)}, ${sqlText(record.sourceYear)}, ${record.sourceRow}, ${sqlText(record.sourceUnitKey)}, ${sqlText(record.sourceUnitLabel)}, ${record.sourceUnitOrder ?? "null"}, ${sqlText(record.vendorName)}, ${sqlText(record.note)}) on conflict (tax_code, source_sheet, source_row) do update set source_unit_key = excluded.source_unit_key, source_unit_label = excluded.source_unit_label, source_unit_order = excluded.source_unit_order, source_vendor_name = excluded.source_vendor_name, source_note = excluded.source_note;`,
+      `insert into public.taxpayer_sources (tax_code, source_sheet, source_year, source_row, source_unit_key, source_unit_label, source_unit_marker, source_unit_order, source_vendor_name, source_note) values (${sqlText(record.taxCode)}, ${sqlText(record.sourceSheet)}, ${sqlText(record.sourceYear)}, ${record.sourceRow}, ${sqlText(record.sourceUnitKey)}, ${sqlText(record.sourceUnitLabel)}, ${sqlText(record.sourceUnitMarker)}, ${record.sourceUnitOrder ?? "null"}, ${sqlText(record.vendorName)}, ${sqlText(record.note)}) on conflict (tax_code, source_sheet, source_row) do update set source_unit_key = excluded.source_unit_key, source_unit_label = excluded.source_unit_label, source_unit_marker = excluded.source_unit_marker, source_unit_order = excluded.source_unit_order, source_vendor_name = excluded.source_vendor_name, source_note = excluded.source_note;`,
     );
   }
 

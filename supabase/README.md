@@ -74,7 +74,8 @@ The administrator can use **Nhập Excel** on the overview or yearly list. Each
 worksheet must be named with a four-digit year or an update label in the form
 `T{month}-{year}` (for example `T2-2026`, `T6-2026`, or `T9-2026`). The
 importer normalizes both forms to the four-digit year, detects unit headings
-such as `I | XƯỞNG DVKT`, and reads all worksheets using only the `Mã số thuế`
+such as `I | XƯỞNG DVKT` and legacy headings such as `II.1 | XƯỞNG DVKT`, and
+keeps the original heading marker for round-trip Excel copy/paste. It reads all worksheets using only the `Mã số thuế`
 column for taxpayer data; other Excel columns are ignored. The master
 `taxpayers` table remains one row per MST, while `taxpayer_sources` keeps every
 year/unit/source-row occurrence, including MSTs that already exist in the

@@ -6,6 +6,7 @@ import { readInCodeBatches } from "@/lib/supabase-pagination";
 import type { TaxpayerExcelCandidate, TaxpayerExcelSource } from "@/lib/taxpayer-excel";
 import {
   getTaxpayerImportSession,
+  getImportSourceYears,
   isTaxpayerImportId,
   readStoredCandidates,
   readStoredSourceUnits,
@@ -54,11 +55,13 @@ function parseCandidates(value: unknown): { candidates?: TaxpayerExcelCandidate[
       const sourceRow = Number(sourceRecord.sourceRow);
       const sourceUnitKey = readText(sourceRecord.sourceUnitKey, 80);
       const sourceUnitLabel = readText(sourceRecord.sourceUnitLabel, 120);
+      const sourceUnitMarker = readText(sourceRecord.sourceUnitMarker, 40);
       const sourceUnitOrderValue = sourceRecord.sourceUnitOrder === null || sourceRecord.sourceUnitOrder === undefined
         ? null
         : Number(sourceRecord.sourceUnitOrder);
       if (!sourceSheet || !sourceYear || !YEAR_PATTERN.test(sourceYear) || sourceSheet !== sourceYear || !Number.isInteger(sourceRow) || sourceRow < 3
         || (sourceUnitKey && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(sourceUnitKey))
+        || (sourceUnitMarker && !/^(?:I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII|XVIII|XIX|XX)(?:\.\s*\d+)?\.?$/i.test(sourceUnitMarker))
         || (sourceUnitOrderValue !== null && (!Number.isInteger(sourceUnitOrderValue) || sourceUnitOrderValue < 1 || sourceUnitOrderValue > 100))) {
         return { error: `Nguồn dữ liệu của MST ${taxCode} có năm hoặc dòng Excel không hợp lệ.` };
       }
@@ -69,6 +72,7 @@ function parseCandidates(value: unknown): { candidates?: TaxpayerExcelCandidate[
         sourceRow,
         sourceUnitKey,
         sourceUnitLabel,
+        sourceUnitMarker,
         sourceUnitOrder: sourceUnitOrderValue,
       };
       const isDuplicateSource = candidate.sources.some((current) => current.sourceSheet === source.sourceSheet && current.sourceRow === source.sourceRow);
@@ -159,6 +163,7 @@ export async function POST(request: Request) {
         source_row: source.sourceRow,
         source_unit_key: source.sourceUnitKey,
         source_unit_label: source.sourceUnitLabel,
+        source_unit_marker: source.sourceUnitMarker,
         source_unit_order: source.sourceUnitOrder,
       })),
     }));
@@ -177,16 +182,20 @@ export async function POST(request: Request) {
     sourceCount = parsed.candidates.reduce((count, candidate) => count + candidate.sources.length, 0);
   }
 
-  if (offset === 0 && sourceUnits.length) {
-    const { error: sourceUnitsError } = await supabase
-      .from("taxpayer_source_units")
-      .upsert(sourceUnits.map((unit) => ({
-        source_year: unit.sourceYear,
-        source_unit_key: unit.unitKey,
-        source_unit_label: unit.unitLabel,
-        source_unit_order: unit.unitOrder,
-        updated_at: new Date().toISOString(),
-      })), { onConflict: "source_year,source_unit_key" });
+  if (offset === 0) {
+    const sourceYears = [...new Set([...getImportSourceYears(candidates), ...sourceUnits.map((unit) => unit.sourceYear)])];
+    const { error: sourceUnitsError } = sourceYears.length
+      ? await supabase.rpc("replace_taxpayer_source_units", {
+        p_source_years: sourceYears,
+        p_units: sourceUnits.map((unit) => ({
+          source_year: unit.sourceYear,
+          source_unit_key: unit.unitKey,
+          source_unit_label: unit.unitLabel,
+          source_unit_marker: unit.unitMarker,
+          source_unit_order: unit.unitOrder,
+        })),
+      })
+      : { error: null };
     if (sourceUnitsError) {
       console.error("taxpayer Excel source units save failed", sourceUnitsError);
       return NextResponse.json({ error: "Không thể lưu danh sách đơn vị từ file Excel." }, { status: 500 });

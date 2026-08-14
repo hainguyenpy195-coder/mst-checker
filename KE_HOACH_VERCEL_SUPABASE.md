@@ -152,6 +152,7 @@ Giữ quan hệ giữa MST và dữ liệu Excel nguồn.
 - `source_row integer`
 - `source_unit_key text`
 - `source_unit_label text`
+- `source_unit_marker text` — giữ nguyên mã heading trong file, ví dụ `I`, `II.1`.
 - `source_unit_order integer`
 - `source_vendor_name text`
 - `source_note text`
@@ -166,8 +167,9 @@ trống như file nguồn.
 - `source_year text`
 - `source_unit_key text`
 - `source_unit_label text`
+- `source_unit_marker text` — giữ nguyên mã heading trong file, kể cả dạng `II.1`, `II.2`.
 - `source_unit_order integer`
-- Khóa chính ghép `(source_year, source_unit_key)`.
+- Khóa chính ghép `(source_year, source_unit_key, source_unit_marker)`.
 
 ### `taxpayer_status_history`
 

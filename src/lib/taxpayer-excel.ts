@@ -26,6 +26,7 @@ export type TaxpayerExcelSource = {
   sourceRow: number;
   sourceUnitKey: string | null;
   sourceUnitLabel: string | null;
+  sourceUnitMarker: string | null;
   sourceUnitOrder: number | null;
 };
 
@@ -38,6 +39,7 @@ export type TaxpayerExcelUnit = {
   sourceYear: string;
   unitKey: string;
   unitLabel: string;
+  unitMarker: string;
   unitOrder: number;
 };
 
@@ -68,12 +70,14 @@ export type TaxpayerWorkbookExportRow = {
   note: string;
   unitKey: string | null;
   unitLabel: string | null;
+  unitMarker: string | null;
   unitOrder: number | null;
 };
 
 export type TaxpayerWorkbookExportUnit = {
   unitKey: string;
   unitLabel: string;
+  unitMarker: string | null;
   unitOrder: number | null;
 };
 
@@ -169,7 +173,7 @@ function findHeader(worksheet: ExcelJS.Worksheet) {
   return null;
 }
 
-const UNIT_MARKER_PATTERN = /^(?:I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII|XVIII|XIX|XX)\.?$/i;
+const UNIT_MARKER_PATTERN = /^(?:I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII|XVIII|XIX|XX)(?:\.\s*\d+)?\.?$/i;
 
 function findUnitHeading(worksheet: ExcelJS.Worksheet, rowNumber: number, taxCodeColumn: number): TaxpayerUnitInfo | null {
   const row = worksheet.getRow(rowNumber);
@@ -194,6 +198,7 @@ export async function parseTaxpayerWorkbook(buffer: Buffer | Uint8Array): Promis
   let duplicateRows = 0;
   let invalidRowCount = 0;
   const maxRows = getTaxpayerExcelMaxRows();
+  const nextUnitOrderByYear = new Map<string, number>();
 
   for (const worksheet of workbook.worksheets) {
     const sourceYear = parseTaxpayerExcelSheetYear(worksheet.name);
@@ -213,12 +218,17 @@ export async function parseTaxpayerWorkbook(buffer: Buffer | Uint8Array): Promis
     for (let rowNumber = header.rowNumber + 1; rowNumber <= lastRowNumber; rowNumber += 1) {
       const unitHeading = findUnitHeading(worksheet, rowNumber, header.taxCodeColumn);
       if (unitHeading) {
-        currentUnit = unitHeading;
-        units.set(`${sourceYear}:${unitHeading.key}`, {
+        const unitIdentity = `${sourceYear}:${unitHeading.key}:${unitHeading.sourceMarker}`;
+        const existingUnit = units.get(unitIdentity);
+        const unitOrder = existingUnit?.unitOrder ?? (nextUnitOrderByYear.get(sourceYear) ?? 0) + 1;
+        nextUnitOrderByYear.set(sourceYear, Math.max(nextUnitOrderByYear.get(sourceYear) ?? 0, unitOrder));
+        currentUnit = { ...unitHeading, order: unitOrder };
+        units.set(unitIdentity, {
           sourceYear,
           unitKey: unitHeading.key,
           unitLabel: unitHeading.sourceLabel,
-          unitOrder: unitHeading.order ?? Number.MAX_SAFE_INTEGER,
+          unitMarker: unitHeading.sourceMarker,
+          unitOrder,
         });
         continue;
       }
@@ -253,6 +263,7 @@ export async function parseTaxpayerWorkbook(buffer: Buffer | Uint8Array): Promis
         sourceRow: rowNumber,
         sourceUnitKey: currentUnit?.key ?? null,
         sourceUnitLabel: currentUnit?.sourceLabel ?? null,
+        sourceUnitMarker: currentUnit?.sourceMarker ?? null,
         sourceUnitOrder: currentUnit?.order ?? null,
       };
       const current = candidates.get(taxCode);
@@ -271,7 +282,7 @@ export async function parseTaxpayerWorkbook(buffer: Buffer | Uint8Array): Promis
 
   return {
     candidates: [...candidates.values()],
-    units: [...units.values()].sort((left, right) => Number(left.sourceYear) - Number(right.sourceYear) || left.unitOrder - right.unitOrder || left.unitLabel.localeCompare(right.unitLabel, "vi")),
+    units: [...units.values()].sort((left, right) => Number(left.sourceYear) - Number(right.sourceYear) || left.unitOrder - right.unitOrder || left.unitMarker.localeCompare(right.unitMarker, "vi")),
     totalRows,
     validRows,
     duplicateRows,
@@ -311,18 +322,20 @@ export function addTaxpayerWorksheet(workbook: ExcelJS.Workbook, year: string, r
 
   let dataIndex = 0;
   const unitByKey = new Map<string, TaxpayerWorkbookExportUnit>();
-  for (const unit of units) unitByKey.set(unit.unitKey, unit);
+  for (const unit of units) unitByKey.set(getWorkbookUnitIdentity(unit.unitKey, unit.unitMarker), unit);
 
   const rowsByUnit = new Map<string, TaxpayerWorkbookExportRow[]>();
   for (const row of rows) {
     const unitKey = row.unitKey ?? row.unitLabel ?? "unclassified";
-    const currentRows = rowsByUnit.get(unitKey) ?? [];
+    const unitIdentity = getWorkbookUnitIdentity(unitKey, row.unitMarker);
+    const currentRows = rowsByUnit.get(unitIdentity) ?? [];
     currentRows.push(row);
-    rowsByUnit.set(unitKey, currentRows);
-    if (!unitByKey.has(unitKey)) {
-      unitByKey.set(unitKey, {
+    rowsByUnit.set(unitIdentity, currentRows);
+    if (!unitByKey.has(unitIdentity)) {
+      unitByKey.set(unitIdentity, {
         unitKey,
         unitLabel: row.unitLabel || "Chưa phân loại",
+        unitMarker: row.unitMarker,
         unitOrder: row.unitOrder,
       });
     }
@@ -335,7 +348,7 @@ export function addTaxpayerWorksheet(workbook: ExcelJS.Workbook, year: string, r
 
   for (const unit of orderedUnits) {
     const unitRow = worksheet.addRow([
-      unit.unitOrder && unit.unitOrder <= 100 ? toRomanNumeral(unit.unitOrder) : "",
+      unit.unitMarker || (unit.unitOrder && unit.unitOrder <= 100 ? toRomanNumeral(unit.unitOrder) : ""),
       unit.unitLabel || "Chưa phân loại",
       "",
       "",
@@ -347,7 +360,7 @@ export function addTaxpayerWorksheet(workbook: ExcelJS.Workbook, year: string, r
     unitRow.font = { name: "Arial", size: 10, bold: true, color: { argb: "FF0B5F8A" } };
     unitRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE7F4FA" } };
 
-    for (const row of rowsByUnit.get(unit.unitKey) ?? []) {
+    for (const row of rowsByUnit.get(getWorkbookUnitIdentity(unit.unitKey, unit.unitMarker)) ?? []) {
       const worksheetRow = worksheet.addRow([
         dataIndex + 1,
         row.name,
@@ -366,6 +379,10 @@ export function addTaxpayerWorksheet(workbook: ExcelJS.Workbook, year: string, r
   }
 
   return worksheet;
+}
+
+function getWorkbookUnitIdentity(unitKey: string, unitMarker: string | null | undefined) {
+  return `${unitKey}::${unitMarker?.trim() || ""}`;
 }
 
 function toRomanNumeral(value: number) {

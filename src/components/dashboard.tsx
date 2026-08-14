@@ -22,7 +22,7 @@ import {
 } from "@phosphor-icons/react";
 import { getDashboardHref, getDashboardViewFromPathname, type DashboardView } from "@/lib/dashboard-routes";
 import { isValidTaxCode, normalizeTaxCode, TAX_CODE_FORMAT_HINT, TAX_CODE_INPUT_PATTERN } from "@/lib/tax-code";
-import { getTaxpayerUnitDisplayName, getTaxpayerUnitOrder } from "@/lib/taxpayer-units";
+import { formatTaxpayerUnitHeading, getTaxpayerUnitDisplayName, getTaxpayerUnitOrder } from "@/lib/taxpayer-units";
 import type { AppRole } from "@/lib/app-auth";
 import InvoicePanel from "@/components/invoice-panel";
 import TaxpayerExcelImportModal from "@/components/taxpayer-excel-import-modal";
@@ -63,6 +63,7 @@ type TaxpayerRow = {
   source_row: number | null;
   source_unit_key: string | null;
   source_unit_label: string | null;
+  source_unit_marker: string | null;
   source_unit_order: number | null;
   source_vendor_name: string | null;
   source_note: string | null;
@@ -73,6 +74,7 @@ type TaxpayerUnitRow = {
   source_year: string;
   source_unit_key: string;
   source_unit_label: string;
+  source_unit_marker: string | null;
   source_unit_order: number;
 };
 
@@ -121,12 +123,17 @@ type TaxCodePreviewResponse = {
 
 type DashboardProps = { username: string; role: AppRole };
 
-function taxpayerUnitKey(row: Pick<TaxpayerRow, "source_unit_key" | "source_unit_label">) {
-  return row.source_unit_key ?? row.source_unit_label ?? "unclassified";
+function taxpayerUnitKey(row: Pick<TaxpayerRow, "source_unit_key" | "source_unit_label" | "source_unit_marker">) {
+  const key = row.source_unit_key ?? row.source_unit_label ?? "unclassified";
+  return `${key}::${row.source_unit_marker?.trim() ?? ""}`;
 }
 
 function taxpayerUnitLabel(row: Pick<TaxpayerRow, "source_unit_key" | "source_unit_label">) {
   return getTaxpayerUnitDisplayName(row.source_unit_key, row.source_unit_label);
+}
+
+function taxpayerUnitHeading(row: Pick<TaxpayerRow, "source_unit_key" | "source_unit_label" | "source_unit_order" | "source_unit_marker">) {
+  return formatTaxpayerUnitHeading(row.source_unit_key, row.source_unit_label, row.source_unit_order, row.source_unit_marker);
 }
 
 function compareTaxpayerRowsByUnit(left: TaxpayerRow, right: TaxpayerRow) {
@@ -140,7 +147,7 @@ function compareTaxpayerRowsByUnit(left: TaxpayerRow, right: TaxpayerRow) {
 }
 
 function taxpayerUnitRecordKey(unit: TaxpayerUnitRow) {
-  return unit.source_unit_key;
+  return `${unit.source_unit_key}::${unit.source_unit_marker?.trim() ?? ""}`;
 }
 
 function waitForTaxpayerBatchRetry(delayMs: number, signal: AbortSignal) {
@@ -243,7 +250,7 @@ function statusClass(taxpayer: TaxpayerDetail | null) {
 }
 
 function matchesTaxpayerQuery(row: TaxpayerRow, needle: string) {
-  return !needle || [row.tax_code, row.source_vendor_name, row.source_unit_label, taxpayerUnitLabel(row), row.taxpayer?.name, row.taxpayer?.status]
+  return !needle || [row.tax_code, row.source_vendor_name, row.source_unit_marker, row.source_unit_label, taxpayerUnitLabel(row), row.taxpayer?.name, row.taxpayer?.status]
     .some((value) => value?.toLowerCase().includes(needle));
 }
 
@@ -529,9 +536,9 @@ export default function Dashboard({ username, role }: DashboardProps) {
 
     const sections = units.map((unit) => ({
       key: taxpayerUnitRecordKey(unit),
-      label: getTaxpayerUnitDisplayName(unit.source_unit_key, unit.source_unit_label),
+      label: formatTaxpayerUnitHeading(unit.source_unit_key, unit.source_unit_label, unit.source_unit_order, unit.source_unit_marker),
       order: unit.source_unit_order,
-      rows: rowsByUnit.get(unit.source_unit_key) ?? [],
+      rows: rowsByUnit.get(taxpayerUnitRecordKey(unit)) ?? [],
     }));
     const knownKeys = new Set(sections.map((section) => section.key));
     for (const [key, groupRows] of rowsByUnit) {
@@ -539,7 +546,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
       const firstRow = groupRows[0];
       sections.push({
         key,
-        label: taxpayerUnitLabel(firstRow),
+        label: taxpayerUnitHeading(firstRow),
         order: getTaxpayerUnitOrder(firstRow.source_unit_key, firstRow.source_unit_order),
         rows: groupRows,
       });

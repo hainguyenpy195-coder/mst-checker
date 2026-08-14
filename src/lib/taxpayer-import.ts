@@ -74,6 +74,8 @@ export function readStoredSourceUnits(value: unknown): TaxpayerExcelUnit[] {
       && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(record.unitKey)
       && typeof record.unitLabel === "string"
       && record.unitLabel.trim().length > 0
+      && typeof record.unitMarker === "string"
+      && /^(?:I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII|XVIII|XIX|XX)(?:\.\s*\d+)?\.?$/i.test(record.unitMarker.trim())
       && Number.isInteger(record.unitOrder)
       && Number(record.unitOrder) > 0;
   });

@@ -115,7 +115,10 @@ export async function POST(request: Request) {
     existing: existingTaxCodes.size,
     new: newCandidateCount,
   };
-  const sourceYears = [...new Set(candidates.flatMap((candidate) => candidate.sources.map((source) => source.sourceYear)))].sort();
+  const sourceYears = [...new Set([
+    ...candidates.flatMap((candidate) => candidate.sources.map((source) => source.sourceYear)),
+    ...parsed.units.map((unit) => unit.sourceYear),
+  ])].sort();
 
   const { error: previewError } = await supabase.from("taxpayer_excel_imports").update({
     status: "previewed",

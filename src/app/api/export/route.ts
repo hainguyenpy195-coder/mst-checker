@@ -29,6 +29,7 @@ type TaxpayerSourceUnitRecord = {
   source_year: string;
   source_unit_key: string;
   source_unit_label: string;
+  source_unit_marker: string | null;
   source_unit_order: number;
 };
 
@@ -62,7 +63,7 @@ export async function GET(request: Request) {
   const sourceResult = await readAllPages((from, to) => {
     let query = supabase
       .from("taxpayer_sources")
-      .select("id, tax_code, source_sheet, source_year, source_row, source_unit_key, source_unit_label, source_unit_order, source_vendor_name, source_note")
+      .select("id, tax_code, source_sheet, source_year, source_row, source_unit_key, source_unit_label, source_unit_marker, source_unit_order, source_vendor_name, source_note")
       .order("source_year", { ascending: true })
       .order("source_unit_order", { ascending: true })
       .order("source_row", { ascending: true })
@@ -77,9 +78,10 @@ export async function GET(request: Request) {
   const sourceUnitResult = await readAllPages((from, to) => {
     let query = supabase
       .from("taxpayer_source_units")
-      .select("source_year, source_unit_key, source_unit_label, source_unit_order")
+      .select("source_year, source_unit_key, source_unit_label, source_unit_marker, source_unit_order")
       .order("source_year", { ascending: true })
       .order("source_unit_order", { ascending: true })
+      .order("source_unit_marker", { ascending: true })
       .order("source_unit_key", { ascending: true })
       .range(from, to);
     if (requestedYear !== "all") query = query.eq("source_year", requestedYear);
@@ -157,12 +159,14 @@ export async function GET(request: Request) {
         note: [...new Set(noteParts)].join(" | "),
         unitKey: source.source_unit_key ?? null,
         unitLabel: getTaxpayerUnitDisplayName(source.source_unit_key, source.source_unit_label),
+        unitMarker: source.source_unit_marker ?? null,
         unitOrder: Number.isInteger(source.source_unit_order) ? source.source_unit_order : null,
       };
     });
     const exportUnits: TaxpayerWorkbookExportUnit[] = (unitsByYear.get(year) ?? []).map((unit) => ({
       unitKey: unit.source_unit_key,
       unitLabel: getTaxpayerUnitDisplayName(unit.source_unit_key, unit.source_unit_label),
+      unitMarker: unit.source_unit_marker,
       unitOrder: getTaxpayerUnitOrder(unit.source_unit_key, unit.source_unit_order),
     }));
     addTaxpayerWorksheet(workbook, year, exportRows, exportUnits);
