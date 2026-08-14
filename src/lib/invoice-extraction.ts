@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { normalizeTaxCode } from "@/lib/tax-code";
 
-export const INVOICE_MODEL_ID = "google/gemini-3.5-flash";
+export const INVOICE_MODEL_ID = "google/gemini-2.5-flash";
 export const DEFAULT_INVOICE_MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
 export const DEFAULT_INVOICE_MONTHLY_SCAN_LIMIT = 200;
 

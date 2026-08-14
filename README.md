@@ -61,7 +61,7 @@ nguồn chính; VietQR được dùng làm nguồn phụ khi XInvoice tạm lỗ
 hạn, đồng thời không xoá các trường mà VietQR không cung cấp.
 
 Tab **Hóa đơn** nhận PDF, XML và hình ảnh tối đa 4 MiB mỗi file. AI Gateway dùng
-model `google/gemini-3.5-flash` để trích xuất thông tin, chống trùng theo số hóa
+model `google/gemini-2.5-flash` để trích xuất thông tin, chống trùng theo số hóa
 đơn và giới hạn 200 lượt quét mỗi tháng qua `INVOICE_MONTHLY_SCAN_LIMIT`.
 Đối chiếu Cục Thuế là luồng bán tự động: hệ thống chuẩn bị dữ liệu và CAPTCHA,
 người dùng nhập CAPTCHA thủ công, sau đó kết quả chỉ cập nhật đúng dòng hóa đơn
