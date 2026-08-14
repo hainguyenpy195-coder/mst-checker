@@ -20,6 +20,7 @@ export default async function DashboardTabLayout({
   const cookieStore = await cookies();
   const session = await verifySessionToken(cookieStore.get(APP_SESSION_COOKIE)?.value);
   if (!session) redirect("/login");
+  if (tab === "settings" && session.role !== "admin") redirect("/overview");
 
-  return <><Dashboard username={session.username} />{children}</>;
+  return <><Dashboard username={session.username} role={session.role} />{children}</>;
 }

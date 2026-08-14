@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/app-auth";
+import { authenticateRequest, isAdminSession } from "@/lib/app-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isValidTaxCode, normalizeTaxCode, TAX_CODE_FORMAT_MESSAGE } from "@/lib/tax-code";
 import type { Taxpayer } from "@/lib/types";
@@ -12,7 +12,8 @@ function isStale(lastCheckedAt: string | null) {
 }
 
 export async function GET(request: Request) {
-  if (!(await authenticateRequest(request))) {
+  const session = await authenticateRequest(request);
+  if (!session) {
     return NextResponse.json({ error: "Bạn cần đăng nhập để tra cứu." }, { status: 401 });
   }
 
@@ -39,7 +40,7 @@ export async function GET(request: Request) {
 
   const stale = isStale(data?.last_checked_at ?? null);
   let refreshRequested = false;
-  if (data && stale) {
+  if (data && stale && isAdminSession(session)) {
     const { error: refreshError } = await supabase.rpc("request_taxpayer_refresh", { p_tax_code: taxCode });
     refreshRequested = !refreshError;
   }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/app-auth";
+import { authenticateRequest, isAdminSession, READ_ONLY_FORBIDDEN_MESSAGE } from "@/lib/app-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { invokeTaxpayerBatchRefresh } from "@/lib/xinvoice-worker";
 
@@ -32,8 +32,12 @@ async function getQueueStatus(supabase: ReturnType<typeof createAdminClient>): P
 }
 
 export async function POST(request: Request) {
-  if (!(await authenticateRequest(request))) {
+  const session = await authenticateRequest(request);
+  if (!session) {
     return NextResponse.json({ error: "Bạn cần đăng nhập." }, { status: 401 });
+  }
+  if (!isAdminSession(session)) {
+    return NextResponse.json({ error: READ_ONLY_FORBIDDEN_MESSAGE }, { status: 403 });
   }
 
   let body: { mode?: RefreshMode } = {};

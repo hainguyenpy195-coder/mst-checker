@@ -16,6 +16,7 @@ import {
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
+import type { AppRole } from "@/lib/app-auth";
 import type { InvoiceQuota, InvoiceRecord, InvoiceTaxpayerSummary, InvoiceVerificationStatus } from "@/lib/invoice-types";
 
 const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
@@ -111,9 +112,9 @@ function comparableTaxCode(value: string | null) {
 function taxpayerStatusMeta(taxpayer: InvoiceTaxpayerSummary | null | undefined) {
   if (!taxpayer) {
     return {
-      label: "Chưa có dữ liệu",
+      label: "MST chưa có trong CSDL",
       className: "invoice-taxpayer-status invoice-taxpayer-unknown",
-      title: "MST chưa có dữ liệu trong danh mục tổng hợp.",
+      title: "MST chưa có trong cơ sở dữ liệu danh mục tổng hợp. Hóa đơn đã được lưu nhưng chưa đồng bộ MST.",
     };
   }
 
@@ -160,7 +161,8 @@ function patchRows(current: InvoiceRecord[], nextInvoice: InvoiceRecord) {
   return current.map((row) => row.id === nextInvoice.id ? nextInvoice : row);
 }
 
-export default function InvoicePanel() {
+export default function InvoicePanel({ role }: { role: AppRole }) {
+  const canVerify = role === "admin";
   const [rows, setRows] = useState<InvoiceRecord[]>([]);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
@@ -291,7 +293,10 @@ export default function InvoicePanel() {
       setSelectedFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
       setPage(1);
-      setNotice("Đã trích xuất và lưu hóa đơn " + (payload.invoice?.invoice_number ?? "") + ".");
+      const syncMessage = payload.taxpayerSync?.message;
+      setNotice(["Đã trích xuất và lưu hóa đơn " + (payload.invoice?.invoice_number ?? "") + ".", syncMessage]
+        .filter(Boolean)
+        .join(" "));
       await loadInvoices();
 
       const sellerTaxCode = comparableTaxCode(payload.invoice?.seller_tax_code ?? null);
@@ -309,7 +314,7 @@ export default function InvoicePanel() {
   }
 
   const beginVerification = useCallback(async (invoice: InvoiceRecord) => {
-    if (verificationIdRef.current) return;
+    if (!canVerify || verificationIdRef.current) return;
     verificationIdRef.current = invoice.id;
     setError(null);
     setVerification({
@@ -320,7 +325,7 @@ export default function InvoicePanel() {
       error: null,
       isSubmitting: false,
     });
-  }, []);
+  }, [canVerify]);
 
   const patchInvoice = useCallback((invoice: InvoiceRecord) => {
     setRows((current) => patchRows(current, invoice));
@@ -335,7 +340,7 @@ export default function InvoicePanel() {
   }, [rows]);
 
   async function saveLookup() {
-    if (!verification || verification.isSubmitting) return;
+    if (!canVerify || !verification || verification.isSubmitting) return;
     const current = verification;
     const lookupUrl = safeExternalLookupUrl(current.lookupUrl);
     const lookupCode = current.lookupCode.trim();
@@ -376,7 +381,7 @@ export default function InvoicePanel() {
   }
 
   async function recordVerification(status: "valid" | "invalid") {
-    if (!verification || verification.isSubmitting) return;
+    if (!canVerify || !verification || verification.isSubmitting) return;
     const current = verification;
     const lookupUrl = safeExternalLookupUrl(current.lookupUrl);
     const lookupCode = current.lookupCode.trim();
@@ -489,7 +494,7 @@ export default function InvoicePanel() {
         <table className="data-table invoice-data-table">
           <thead><tr><th>Số hóa đơn</th><th>Nhà cung cấp / MST</th><th>Ký hiệu · Mẫu số</th><th>Tiền thuế</th><th>Tổng tiền</th><th>Tình trạng</th><th>Import lúc</th></tr></thead>
           <tbody>
-            {isLoading ? <InvoiceTableSkeleton /> : rows.length === 0 ? <tr><td colSpan={7}><div className="table-empty"><FileText size={26} /><strong>Chưa có hóa đơn</strong><span>Chọn file ở khu vực import để bắt đầu trích xuất.</span></div></td></tr> : rows.map((invoice) => <InvoiceTableRow key={invoice.id} invoice={invoice} isBusy={verificationIdRef.current === invoice.id} onVerify={beginVerification} />)}
+            {isLoading ? <InvoiceTableSkeleton /> : rows.length === 0 ? <tr><td colSpan={7}><div className="table-empty"><FileText size={26} /><strong>Chưa có hóa đơn</strong><span>Chọn file ở khu vực import để bắt đầu trích xuất.</span></div></td></tr> : rows.map((invoice) => <InvoiceTableRow key={invoice.id} invoice={invoice} canVerify={canVerify} isBusy={verificationIdRef.current === invoice.id} onVerify={beginVerification} />)}
           </tbody>
         </table>
       </div>
@@ -506,18 +511,19 @@ function InvoiceMetric({ label, value, tone }: { label: string; value: number; t
 
 type InvoiceTableRowProps = {
   invoice: InvoiceRecord;
+  canVerify: boolean;
   isBusy: boolean;
   onVerify: (invoice: InvoiceRecord) => void;
 };
 
-const InvoiceTableRow = memo(function InvoiceTableRow({ invoice, isBusy, onVerify }: InvoiceTableRowProps) {
+const InvoiceTableRow = memo(function InvoiceTableRow({ invoice, canVerify, isBusy, onVerify }: InvoiceTableRowProps) {
   const status = statusLabel(invoice.verification_status);
   const taxpayerStatus = taxpayerStatusMeta(invoice.seller_taxpayer);
   const identity = effectiveInvoiceIdentity(invoice);
-  const canVerify = Boolean(invoice.invoice_number);
+  const hasInvoiceNumber = Boolean(invoice.invoice_number);
   return <tr className="data-row invoice-data-row">
     <td className="invoice-number-cell">
-      <div className="invoice-number-action"><strong>{invoice.invoice_number}</strong><button className="invoice-verify-button" type="button" disabled={!canVerify || isBusy} title={canVerify ? "Mở thông tin tra cứu của nhà cung cấp" : "Thiếu số hóa đơn"} onClick={() => onVerify(invoice)}><ShieldCheck size={15} /> {isBusy ? "Đang mở" : "Đối chiếu"}</button></div>
+      <div className="invoice-number-action"><strong>{invoice.invoice_number}</strong>{canVerify ? <button className="invoice-verify-button" type="button" disabled={!hasInvoiceNumber || isBusy} title="Mở thông tin tra cứu của nhà cung cấp" onClick={() => onVerify(invoice)}><ShieldCheck size={15} /> {isBusy ? "Đang mở" : "Đối chiếu"}</button> : null}</div>
       {invoice.verification_message ? <small title={invoice.verification_message}>{invoice.verification_message}</small> : null}
     </td>
     <td><strong>{invoice.seller_name ?? "Chưa có tên"}</strong>{invoice.seller_tax_code ? <div className="invoice-seller-tax"><small className="mono-value">{invoice.seller_tax_code}</small><span className={taxpayerStatus.className} title={taxpayerStatus.title}>{taxpayerStatus.label}</span></div> : <small className="mono-value">Chưa có MST</small>}</td>

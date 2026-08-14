@@ -2,9 +2,8 @@ import { NextResponse } from "next/server";
 import { authenticateRequest } from "@/lib/app-auth";
 import { INVOICE_MODEL_ID, extractInvoiceFromFile, getInvoiceMaxUploadBytes, getInvoiceMonthlyScanLimit, normalizeExtractedInvoice, resolveInvoiceFileDescriptor, sha256Hex } from "@/lib/invoice-extraction";
 import { INVOICE_SELECT } from "@/lib/invoice-db";
-import { attachInvoiceTaxpayers, ensureInvoiceTaxpayer } from "@/lib/invoice-taxpayer";
+import { attachInvoiceTaxpayers, normalizeInvoiceSellerTaxCode } from "@/lib/invoice-taxpayer";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { invokeTaxpayerRefresh } from "@/lib/xinvoice-worker";
 import type { InvoiceRecord } from "@/lib/invoice-types";
 
 export const runtime = "nodejs";
@@ -113,6 +112,37 @@ export async function POST(request: Request) {
     }, { status: 409 });
   }
 
+  const normalizedSellerTaxCode = normalizeInvoiceSellerTaxCode(extracted.seller_tax_code);
+  let taxpayerSync: {
+    status: "not_applicable" | "existing" | "missing" | "error";
+    message?: string;
+  } = { status: "not_applicable" };
+
+  if (!normalizedSellerTaxCode) {
+    taxpayerSync = {
+      status: "error",
+      message: "Không đọc được MST bên bán hợp lệ. Hóa đơn vẫn được lưu, nhưng chưa thể đối chiếu với danh mục MST.",
+    };
+  } else {
+    const { data: taxpayer, error: taxpayerError } = await supabase
+      .from("taxpayers")
+      .select("tax_code")
+      .eq("tax_code", normalizedSellerTaxCode)
+      .maybeSingle<{ tax_code: string }>();
+
+    if (taxpayerError) {
+      console.error("invoice seller taxpayer existence check failed", taxpayerError);
+      return NextResponse.json({ error: "Không thể kiểm tra MST bên bán trong dữ liệu tổng hợp." }, { status: 500 });
+    }
+
+    taxpayerSync = taxpayer
+      ? { status: "existing" }
+      : {
+          status: "missing",
+          message: `MST ${normalizedSellerTaxCode} chưa có trong cơ sở dữ liệu tổng hợp MST. Quản trị viên cần thêm MST trước khi cập nhật dữ liệu.`,
+        };
+  }
+
   const fileName = fileValue.name.replace(/[\\\\/]/g, "_").slice(0, 255);
   const { data: invoice, error: insertError } = await supabase
     .from("invoices")
@@ -142,61 +172,16 @@ export async function POST(request: Request) {
   }
 
   let invoiceWithTaxpayer = invoice as unknown as InvoiceRecord;
-  let taxpayerSync: {
-    status: "not_applicable" | "existing" | "added" | "pending" | "error";
-    message?: string;
-  } = { status: "not_applicable" };
 
-  const normalizedSellerTaxCode = extracted.seller_tax_code;
-  if (normalizedSellerTaxCode) {
+  if (extracted.seller_tax_code) {
     try {
-      const ensureResult = await ensureInvoiceTaxpayer(supabase, {
-        sellerTaxCode: normalizedSellerTaxCode,
-        sellerName: extracted.seller_name,
-        invoiceDate: extracted.invoice_date,
-        sourceFileName: fileName,
-      });
-
-      if (!ensureResult.taxCode) {
-        taxpayerSync = {
-          status: "error",
-          message: "MST bên bán không đúng định dạng nên chưa được đưa vào danh mục MST.",
-        };
-      } else {
-        taxpayerSync = { status: ensureResult.created ? "added" : "existing" };
-
-        if (ensureResult.created) {
-          try {
-            const workerPayload = await invokeTaxpayerRefresh(ensureResult.taxCode);
-            const workerResult = workerPayload.results?.find((result) => result.tax_code === ensureResult.taxCode);
-            if (workerPayload.processed === 0 || !workerResult) {
-              taxpayerSync = {
-                status: "pending",
-                message: "MST mới đã được đưa vào hàng đợi và đang chờ worker cập nhật.",
-              };
-            } else if (!workerResult.ok) {
-              taxpayerSync = {
-                status: "error",
-                message: workerResult.error ?? "Worker chưa cập nhật được MST mới.",
-              };
-            }
-          } catch (workerError) {
-            console.error("invoice taxpayer worker invocation failed", workerError);
-            taxpayerSync = {
-              status: "pending",
-              message: "MST mới đã được lưu nhưng chưa gọi được worker cập nhật.",
-            };
-          }
-        }
-      }
-
       const [enrichedInvoice] = await attachInvoiceTaxpayers(supabase, [invoiceWithTaxpayer]);
       if (enrichedInvoice) invoiceWithTaxpayer = enrichedInvoice as InvoiceRecord;
     } catch (taxpayerError) {
       console.error("invoice taxpayer synchronization failed", taxpayerError);
       taxpayerSync = {
         status: "error",
-        message: "Đã lưu hóa đơn nhưng chưa đồng bộ được MST bên bán vào danh mục MST.",
+        message: "Đã lưu hóa đơn nhưng chưa đọc được trạng thái MST bên bán trong danh mục tổng hợp.",
       };
     }
   }

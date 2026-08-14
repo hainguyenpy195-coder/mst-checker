@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/app-auth";
+import { authenticateRequest, isAdminSession, READ_ONLY_FORBIDDEN_MESSAGE } from "@/lib/app-auth";
 import { normalizeInvoiceLookupCode, normalizeInvoiceLookupUrl } from "@/lib/invoice-extraction";
 import { INVOICE_SELECT } from "@/lib/invoice-db";
 import { attachInvoiceTaxpayers } from "@/lib/invoice-taxpayer";
@@ -120,6 +120,9 @@ export async function POST(
 ) {
   const session = await authenticateRequest(request);
   if (!session) return NextResponse.json({ error: "Bạn cần đăng nhập." }, { status: 401 });
+  if (!isAdminSession(session)) {
+    return NextResponse.json({ error: READ_ONLY_FORBIDDEN_MESSAGE }, { status: 403 });
+  }
 
   const { id } = await context.params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) return NextResponse.json({ error: "Mã hóa đơn không hợp lệ." }, { status: 400 });

@@ -27,9 +27,16 @@ Review `supabase/seed.sql` and run it privately in the target Supabase project. 
 ## Application login
 
 The internal deployment intentionally does not use Supabase Auth. Vercel checks
-`APP_LOGIN_USERNAME` and `APP_LOGIN_PASSWORD`, then issues a signed httpOnly
-cookie using `APP_SESSION_SECRET`. Database requests are made only by Next.js
-server routes with `SUPABASE_SECRET_KEY`.
+`APP_LOGIN_USERNAME` and `APP_LOGIN_PASSWORD` for the administrator account,
+then issues a signed httpOnly cookie using `APP_SESSION_SECRET`. The optional
+`APP_READONLY_USERNAME` and `APP_READONLY_PASSWORD` configure the readonly
+account. Database requests are made only by Next.js server routes with
+`SUPABASE_SECRET_KEY`.
+
+The readonly account can view/search the taxpayer and invoice data and import
+invoices. Invoice import never creates a missing taxpayer or starts a taxpayer
+refresh; the invoice table marks that seller as missing from the aggregate
+taxpayer database so an administrator can add and refresh it separately.
 
 ## XInvoice worker
 

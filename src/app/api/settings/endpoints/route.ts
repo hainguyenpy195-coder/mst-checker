@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/app-auth";
+import { authenticateRequest, isAdminSession, READ_ONLY_FORBIDDEN_MESSAGE } from "@/lib/app-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -36,8 +36,12 @@ function responseFromSettings(rows: Array<{ setting_key: string; setting_value: 
 }
 
 export async function GET(request: Request) {
-  if (!(await authenticateRequest(request))) {
+  const session = await authenticateRequest(request);
+  if (!session) {
     return NextResponse.json({ error: "Bạn cần đăng nhập." }, { status: 401 });
+  }
+  if (!isAdminSession(session)) {
+    return NextResponse.json({ error: READ_ONLY_FORBIDDEN_MESSAGE }, { status: 403 });
   }
 
   const supabase = createAdminClient();
@@ -57,6 +61,9 @@ export async function GET(request: Request) {
 export async function PUT(request: Request) {
   const session = await authenticateRequest(request);
   if (!session) return NextResponse.json({ error: "Bạn cần đăng nhập." }, { status: 401 });
+  if (!isAdminSession(session)) {
+    return NextResponse.json({ error: READ_ONLY_FORBIDDEN_MESSAGE }, { status: 403 });
+  }
 
   let body: { primaryEndpoint?: unknown; fallbackEndpoint?: unknown };
   try {

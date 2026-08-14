@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/app-auth";
+import { authenticateRequest, isAdminSession, READ_ONLY_FORBIDDEN_MESSAGE } from "@/lib/app-auth";
 import { createGdtLookupSession, GdtLookupError, refreshGdtCaptcha, submitGdtLookup } from "@/lib/gdt-manual-lookup";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isValidTaxCode, normalizeTaxCode, TAX_CODE_FORMAT_MESSAGE } from "@/lib/tax-code";
@@ -214,6 +214,9 @@ async function applyManualLookup(username: string, record: { taxCode: string; na
 export async function POST(request: Request) {
   const session = await authenticateRequest(request);
   if (!session) return NextResponse.json({ error: "Bạn cần đăng nhập." }, { status: 401 });
+  if (!isAdminSession(session)) {
+    return NextResponse.json({ error: READ_ONLY_FORBIDDEN_MESSAGE }, { status: 403 });
+  }
 
   const body = await readBody(request);
   if (!body || (body.action !== "start" && body.action !== "submit")) {

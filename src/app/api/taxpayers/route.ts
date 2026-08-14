@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/app-auth";
+import { authenticateRequest, isAdminSession, READ_ONLY_FORBIDDEN_MESSAGE } from "@/lib/app-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isValidTaxCode, normalizeTaxCode, TAX_CODE_FORMAT_MESSAGE } from "@/lib/tax-code";
 import { invokeTaxpayerRefresh } from "@/lib/xinvoice-worker";
@@ -97,6 +97,9 @@ export async function POST(request: Request) {
   if (!session) {
     return NextResponse.json({ error: "Bạn cần đăng nhập." }, { status: 401 });
   }
+  if (!isAdminSession(session)) {
+    return NextResponse.json({ error: READ_ONLY_FORBIDDEN_MESSAGE }, { status: 403 });
+  }
 
   let body: { taxCode?: string; name?: string; year?: string; note?: string };
   try {
@@ -174,6 +177,9 @@ export async function DELETE(request: Request) {
   const session = await authenticateRequest(request);
   if (!session) {
     return NextResponse.json({ error: "Bạn cần đăng nhập." }, { status: 401 });
+  }
+  if (!isAdminSession(session)) {
+    return NextResponse.json({ error: READ_ONLY_FORBIDDEN_MESSAGE }, { status: 403 });
   }
 
   let body: { taxCode?: string; confirmed?: boolean };

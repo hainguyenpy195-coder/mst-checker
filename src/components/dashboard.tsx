@@ -23,6 +23,7 @@ import {
 } from "@phosphor-icons/react";
 import { getDashboardHref, getDashboardViewFromPathname, type DashboardView } from "@/lib/dashboard-routes";
 import { isValidTaxCode, normalizeTaxCode, TAX_CODE_FORMAT_HINT, TAX_CODE_INPUT_PATTERN } from "@/lib/tax-code";
+import type { AppRole } from "@/lib/app-auth";
 import InvoicePanel from "@/components/invoice-panel";
 
 const DEFAULT_YEARS = ["2023", "2024", "2025", "2026"];
@@ -94,7 +95,7 @@ type TaxCodePreviewResponse = {
   error?: string;
 };
 
-type DashboardProps = { username: string };
+type DashboardProps = { username: string; role: AppRole };
 
 function AttechLogo({ compact = false }: { compact?: boolean }) {
   return (
@@ -164,7 +165,7 @@ function activityLabel(action: ActivityRow["action"]) {
   return action === "taxpayer_added" ? "Đã thêm" : "Đã xóa";
 }
 
-export default function Dashboard({ username }: DashboardProps) {
+export default function Dashboard({ username, role }: DashboardProps) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -210,6 +211,7 @@ export default function Dashboard({ username }: DashboardProps) {
   const activeYear = viewMode === "sheets" ? selectedYear : viewMode === "overview" ? "all" : null;
   const latestYear = getLatestYear(years);
   const isDataView = viewMode === "overview" || viewMode === "sheets";
+  const canWrite = role === "admin";
 
   useEffect(() => {
     if (viewMode !== "sheets") return;
@@ -389,7 +391,7 @@ export default function Dashboard({ username }: DashboardProps) {
   }
 
   async function refreshAllTaxpayers() {
-    if (refreshAllLock.current) return;
+    if (!canWrite || refreshAllLock.current) return;
 
     refreshAllLock.current = true;
     setIsRefreshingAll(true);
@@ -449,7 +451,7 @@ export default function Dashboard({ username }: DashboardProps) {
   }
 
   async function startManualLookup(taxCode: string, replaceExisting = false) {
-    if (isStartingManualLookup || (!replaceExisting && manualLookup)) return;
+    if (!canWrite || isStartingManualLookup || (!replaceExisting && manualLookup)) return;
 
     const continuingAfterCaptchaLimit = replaceExisting && Boolean(manualLookup?.requiresCaptchaRefresh);
     setIsStartingManualLookup(true);
@@ -575,7 +577,7 @@ export default function Dashboard({ username }: DashboardProps) {
   }
 
   async function refreshTaxpayer(row: TaxpayerRow) {
-    if (updatingTaxCode || isStartingManualLookup || manualLookup) return;
+    if (!canWrite || updatingTaxCode || isStartingManualLookup || manualLookup) return;
     await startManualLookup(row.tax_code);
   }
 
@@ -670,6 +672,7 @@ export default function Dashboard({ username }: DashboardProps) {
 
   async function addTaxpayer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!canWrite) return;
     const taxCode = normalizeTaxCode(newTaxCode);
     const pendingRequest = taxCodeLookupRequest.current;
     const lookupResult = pendingRequest?.taxCode === taxCode
@@ -706,6 +709,7 @@ export default function Dashboard({ username }: DashboardProps) {
   }
 
   function toggleAddForm() {
+    if (!canWrite) return;
     const nextVisible = !showAddForm;
     setShowAddForm(nextVisible);
     setError(null);
@@ -718,6 +722,7 @@ export default function Dashboard({ username }: DashboardProps) {
   }
 
   function openDeleteDialog(row: TaxpayerRow) {
+    if (!canWrite) return;
     setDeleteTarget({
       taxCode: row.tax_code,
       name: row.taxpayer?.name ?? row.source_vendor_name ?? null,
@@ -728,7 +733,7 @@ export default function Dashboard({ username }: DashboardProps) {
   }
 
   async function deleteTaxpayer() {
-    if (!deleteTarget || isDeleting) return;
+    if (!canWrite || !deleteTarget || isDeleting) return;
 
     setIsDeleting(true);
     setDeleteError(null);
@@ -784,7 +789,7 @@ export default function Dashboard({ username }: DashboardProps) {
         </nav>
         <div className="sidebar-section-label sidebar-section-spaced">HỆ THỐNG</div>
         <nav className="sidebar-nav" aria-label="Hệ thống">
-          <button className={`sidebar-link sidebar-link-settings ${viewMode === "settings" ? "sidebar-link-active" : ""}`} type="button" onClick={() => navigateToView("settings")}><Gear size={18} /> <span>Cấu hình</span></button>
+          {canWrite ? <button className={`sidebar-link sidebar-link-settings ${viewMode === "settings" ? "sidebar-link-active" : ""}`} type="button" onClick={() => navigateToView("settings")}><Gear size={18} /> <span>Cấu hình</span></button> : null}
         </nav>
       </aside>
 
@@ -809,12 +814,12 @@ export default function Dashboard({ username }: DashboardProps) {
               <h1>{viewMode === "overview" ? "Bảng tổng hợp" : viewMode === "sheets" ? "Danh sách MST năm " + selectedYear : viewMode === "invoices" ? "Hóa đơn" : viewMode === "activity" ? "Lịch sử thao tác" : "Cấu hình"}</h1>
             </div>
             {viewMode === "overview" || viewMode === "sheets" ? <div className="heading-actions">
-              <button className="outline-button" type="button" onClick={toggleAddForm} disabled={isRefreshingAll}><Plus size={17} /> Thêm MST</button>
+              {canWrite ? <button className="outline-button" type="button" onClick={toggleAddForm} disabled={isRefreshingAll}><Plus size={17} /> Thêm MST</button> : null}
               <button className="export-button" type="button" onClick={() => void exportWorkbook()} disabled={isExporting || isRefreshingAll}><DownloadSimple size={17} /> {isExporting ? "Đang xuất" : "Xuất Excel"}</button>
             </div> : null}
           </div>
 
-          {showAddForm ? <form className="add-panel" onSubmit={addTaxpayer}><div className="add-panel-heading"><div><strong>Thêm mã số thuế vào danh mục</strong><span>MST mới sẽ được đưa vào hàng đợi cập nhật.</span></div><button className="icon-button" type="button" aria-label="Đóng form" onClick={closeAddForm}>×</button></div><div className="add-grid"><label>Mã số thuế<input value={newTaxCode} onChange={(event) => handleTaxCodeChange(event.target.value)} onBlur={() => { void checkNewTaxCode(newTaxCode); }} placeholder="0101248141 hoặc 0105029292-022" pattern={TAX_CODE_INPUT_PATTERN} maxLength={14} title={TAX_CODE_FORMAT_HINT} aria-invalid={taxCodeLookupState === "duplicate" || taxCodeLookupState === "invalid"} aria-describedby={taxCodeLookupMessage ? "tax-code-lookup-status" : undefined} required /></label><label>Tên người nộp thuế<input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Tên doanh nghiệp" /></label><label>Năm theo dõi<input value={newYear} onChange={(event) => setNewYear(event.target.value)} inputMode="numeric" pattern="[0-9]{4}" maxLength={4} required /></label><label>Ghi chú<input value={newNote} onChange={(event) => setNewNote(event.target.value)} placeholder="Thông tin bổ sung (nếu có)" /></label></div>{taxCodeLookupMessage ? <div className={`add-lookup-status add-lookup-status-${taxCodeLookupState}`} id="tax-code-lookup-status" role={taxCodeLookupState === "duplicate" || taxCodeLookupState === "invalid" ? "alert" : "status"}>{taxCodeLookupState === "checking" ? <ArrowsClockwise size={16} className="update-icon-spinning" /> : taxCodeLookupState === "ready" ? <CheckCircle size={16} /> : <WarningCircle size={16} />}<span>{taxCodeLookupMessage}</span></div> : null}<div className="add-panel-actions"><button className="outline-button" type="button" onClick={closeAddForm}>Hủy</button><button className="export-button" type="submit" disabled={isAdding || taxCodeLookupState === "checking" || taxCodeLookupState === "duplicate"}>{isAdding ? "Đang thêm..." : "Lưu MST"}</button></div></form> : null}
+          {canWrite && showAddForm ? <form className="add-panel" onSubmit={addTaxpayer}><div className="add-panel-heading"><div><strong>Thêm mã số thuế vào danh mục</strong><span>MST mới sẽ được đưa vào hàng đợi cập nhật.</span></div><button className="icon-button" type="button" aria-label="Đóng form" onClick={closeAddForm}>×</button></div><div className="add-grid"><label>Mã số thuế<input value={newTaxCode} onChange={(event) => handleTaxCodeChange(event.target.value)} onBlur={() => { void checkNewTaxCode(newTaxCode); }} placeholder="0101248141 hoặc 0105029292-022" pattern={TAX_CODE_INPUT_PATTERN} maxLength={14} title={TAX_CODE_FORMAT_HINT} aria-invalid={taxCodeLookupState === "duplicate" || taxCodeLookupState === "invalid"} aria-describedby={taxCodeLookupMessage ? "tax-code-lookup-status" : undefined} required /></label><label>Tên người nộp thuế<input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Tên doanh nghiệp" /></label><label>Năm theo dõi<input value={newYear} onChange={(event) => setNewYear(event.target.value)} inputMode="numeric" pattern="[0-9]{4}" maxLength={4} required /></label><label>Ghi chú<input value={newNote} onChange={(event) => setNewNote(event.target.value)} placeholder="Thông tin bổ sung (nếu có)" /></label></div>{taxCodeLookupMessage ? <div className={`add-lookup-status add-lookup-status-${taxCodeLookupState}`} id="tax-code-lookup-status" role={taxCodeLookupState === "duplicate" || taxCodeLookupState === "invalid" ? "alert" : "status"}>{taxCodeLookupState === "checking" ? <ArrowsClockwise size={16} className="update-icon-spinning" /> : taxCodeLookupState === "ready" ? <CheckCircle size={16} /> : <WarningCircle size={16} />}<span>{taxCodeLookupMessage}</span></div> : null}<div className="add-panel-actions"><button className="outline-button" type="button" onClick={closeAddForm}>Hủy</button><button className="export-button" type="submit" disabled={isAdding || taxCodeLookupState === "checking" || taxCodeLookupState === "duplicate"}>{isAdding ? "Đang thêm..." : "Lưu MST"}</button></div></form> : null}
 
           {notice ? <div className="page-notice page-notice-success" role="status"><CheckCircle size={18} /> {notice}</div> : null}
 
@@ -822,11 +827,12 @@ export default function Dashboard({ username }: DashboardProps) {
 
           {viewMode === "activity" ? <ActivityPanel rows={activityRows} isLoading={isActivityLoading} error={activityError} /> : null}
 
-          {viewMode === "invoices" ? <InvoicePanel /> : null}
+          {viewMode === "invoices" ? <InvoicePanel role={role} /> : null}
 
           {isDataView ? <>
           <MobileLookupPanel
             viewMode={viewMode}
+            canWrite={canWrite}
             selectedYear={selectedYear}
             lookupRows={mobileLookupRows}
             query={query}
@@ -873,7 +879,7 @@ export default function Dashboard({ username }: DashboardProps) {
                     return <Fragment key={row.id}>
                       <tr key={row.id} className={`data-row ${isExpanded ? "data-row-expanded" : ""}`} onClick={() => setExpandedRow(isExpanded ? null : row.id)}>
                         <td className="col-expand"><CaretRight size={16} className={isExpanded ? "caret-open" : ""} /></td>
-                        <td className="tax-code-cell"><div className="tax-code-with-action"><span>{row.tax_code}</span><button className="row-update-button" type="button" title={refreshTitle} aria-label={refreshTitle} disabled={Boolean(updatingTaxCode) || isStartingManualLookup || Boolean(manualLookup) || isRefreshingAll} onClick={(event) => { event.stopPropagation(); void refreshTaxpayer(row); }}><ArrowsClockwise size={13} className={updatingTaxCode === row.tax_code ? "update-icon-spinning" : ""} /></button><button className="row-delete-button" type="button" title={`Xóa toàn bộ MST ${row.tax_code}`} aria-label={`Xóa toàn bộ MST ${row.tax_code}`} disabled={isDeleting || isRefreshingAll || Boolean(manualLookup)} onClick={(event) => { event.stopPropagation(); openDeleteDialog(row); }}><Trash size={13} /></button></div></td>
+                        <td className="tax-code-cell"><div className="tax-code-with-action"><span>{row.tax_code}</span>{canWrite ? <><button className="row-update-button" type="button" title={refreshTitle} aria-label={refreshTitle} disabled={Boolean(updatingTaxCode) || isStartingManualLookup || Boolean(manualLookup) || isRefreshingAll} onClick={(event) => { event.stopPropagation(); void refreshTaxpayer(row); }}><ArrowsClockwise size={13} className={updatingTaxCode === row.tax_code ? "update-icon-spinning" : ""} /></button><button className="row-delete-button" type="button" title={`Xóa toàn bộ MST ${row.tax_code}`} aria-label={`Xóa toàn bộ MST ${row.tax_code}`} disabled={isDeleting || isRefreshingAll || Boolean(manualLookup)} onClick={(event) => { event.stopPropagation(); openDeleteDialog(row); }}><Trash size={13} /></button></> : null}</div></td>
                         <td><strong>{detail?.name ?? row.source_vendor_name ?? "Chưa có tên"}</strong>{sourceIsStale ? <small className="stale-source-label">Dữ liệu cũ</small> : null}<small>{detail?.address ?? ""}</small></td>
                         <td><span className="sheet-label">{row.source_sheet}</span></td>
                         <td><span className={statusClass(detail)}>{statusLabel(detail)}</span></td>
@@ -917,6 +923,7 @@ export default function Dashboard({ username }: DashboardProps) {
 
 type MobileLookupPanelProps = {
   viewMode: ViewMode;
+  canWrite: boolean;
   selectedYear: string;
   lookupRows: TaxpayerRow[];
   query: string;
@@ -938,6 +945,7 @@ type MobileLookupPanelProps = {
 
 function MobileLookupPanel({
   viewMode,
+  canWrite,
   selectedYear,
   lookupRows,
   query,
@@ -1010,6 +1018,7 @@ function MobileLookupPanel({
         {mobileResults.map((row) => <MobileTaxpayerCard
           key={row.id}
           row={row}
+          canWrite={canWrite}
           isExpanded={expandedRow === row.id}
           isUpdating={updatingTaxCode === row.tax_code}
           disableRefresh={Boolean(updatingTaxCode) || isStartingManualLookup || isManualLookupOpen || isRefreshingAll}
@@ -1026,6 +1035,7 @@ function MobileLookupPanel({
 
 type MobileTaxpayerCardProps = {
   row: TaxpayerRow;
+  canWrite: boolean;
   isExpanded: boolean;
   isUpdating: boolean;
   disableRefresh: boolean;
@@ -1035,7 +1045,7 @@ type MobileTaxpayerCardProps = {
   onDelete: () => void;
 };
 
-function MobileTaxpayerCard({ row, isExpanded, isUpdating, disableRefresh, disableDelete, onToggle, onRefresh, onDelete }: MobileTaxpayerCardProps) {
+function MobileTaxpayerCard({ row, canWrite, isExpanded, isUpdating, disableRefresh, disableDelete, onToggle, onRefresh, onDelete }: MobileTaxpayerCardProps) {
   const detail = row.taxpayer;
   const sourceIsStale = isSourceDataStale(detail?.source_updated_at ?? null);
   const name = detail?.name ?? row.source_vendor_name ?? "Chưa có tên";
@@ -1057,10 +1067,10 @@ function MobileTaxpayerCard({ row, isExpanded, isUpdating, disableRefresh, disab
         <div><dt>Nguồn dữ liệu</dt><dd>{formatSourceDate(detail?.source_updated_at ?? null)}</dd></div>
       </dl>
       {detail?.last_error ? <div className="mobile-detail-error"><WarningCircle size={16} /> {detail.last_error}</div> : null}
-      <div className="mobile-result-actions">
+      {canWrite ? <div className="mobile-result-actions">
         <button className="outline-button" type="button" title={refreshTitle} disabled={disableRefresh} onClick={onRefresh}><ArrowsClockwise size={16} className={isUpdating ? "update-icon-spinning" : ""} /> {isUpdating ? "Đang mở CAPTCHA" : "Đối chiếu Cục Thuế"}</button>
         <button className="mobile-delete-action" type="button" disabled={disableDelete} onClick={onDelete}><Trash size={16} /> Xóa</button>
-      </div>
+      </div> : null}
     </div> : null}
   </article>;
 }
