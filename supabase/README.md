@@ -71,13 +71,17 @@ configured to bypass XInvoice limits or use rotating proxies.
 ## Taxpayer Excel import
 
 The administrator can use **Nhập Excel** on the overview or yearly list. Each
-worksheet must be named with a four-digit year, and the importer reads all
-worksheets using only the `Mã số thuế` column; all other Excel columns are
-ignored. It filters against
-the aggregate `taxpayers` table, creates one taxpayer row per new MST, keeps
-each worksheet year in `taxpayer_sources`, and then refreshes only those new
-MST codes through the worker. Existing MSTs and invalid rows are reported and
-skipped. Large workbooks are uploaded directly to the private
+worksheet must be named with a four-digit year or an update label in the form
+`T{month}-{year}` (for example `T2-2026`, `T6-2026`, or `T9-2026`). The
+importer normalizes both forms to the four-digit year, detects unit headings
+such as `I | XƯỞNG DVKT`, and reads all worksheets using only the `Mã số thuế`
+column for taxpayer data; other Excel columns are ignored. The master
+`taxpayers` table remains one row per MST, while `taxpayer_sources` keeps every
+year/unit/source-row occurrence, including MSTs that already exist in the
+master table. The yearly view and exports can therefore reproduce the source
+workbook grouping, while the overview still deduplicates by MST. Existing MSTs
+and invalid rows are reported separately. Large workbooks are uploaded directly
+to the private
 `taxpayer-imports` Storage bucket; the Vercel API receives only the import
 session ID. A completed workbook import is also recorded as an
 `excel_imported` event in `taxpayer_activity_logs`.

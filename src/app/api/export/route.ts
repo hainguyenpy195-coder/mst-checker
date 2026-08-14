@@ -4,6 +4,7 @@ import { authenticateRequest } from "@/lib/app-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { readAllPages, readInCodeBatches } from "@/lib/supabase-pagination";
 import { addTaxpayerWorksheet, type TaxpayerWorkbookExportRow } from "@/lib/taxpayer-excel";
+import { getTaxpayerUnitDisplayName, getTaxpayerUnitOrder } from "@/lib/taxpayer-units";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -54,8 +55,9 @@ export async function GET(request: Request) {
   const sourceResult = await readAllPages((from, to) => {
     let query = supabase
       .from("taxpayer_sources")
-      .select("id, tax_code, source_sheet, source_year, source_row, source_vendor_name, source_note")
+      .select("id, tax_code, source_sheet, source_year, source_row, source_unit_key, source_unit_label, source_unit_order, source_vendor_name, source_note")
       .order("source_year", { ascending: true })
+      .order("source_unit_order", { ascending: true })
       .order("source_row", { ascending: true })
       .range(from, to);
     if (requestedYear !== "all") query = query.eq("source_year", requestedYear);
@@ -104,7 +106,13 @@ export async function GET(request: Request) {
   const years = [...grouped.keys()].sort((left, right) => Number(left) - Number(right));
 
   for (const year of years) {
-    const exportRows: TaxpayerWorkbookExportRow[] = (grouped.get(year) ?? []).map((source) => {
+    const exportRows: TaxpayerWorkbookExportRow[] = (grouped.get(year) ?? [])
+      .sort((left, right) => {
+        const unitOrderDifference = getTaxpayerUnitOrder(left.source_unit_key, left.source_unit_order)
+          - getTaxpayerUnitOrder(right.source_unit_key, right.source_unit_order);
+        return unitOrderDifference || (left.source_row ?? Number.MAX_SAFE_INTEGER) - (right.source_row ?? Number.MAX_SAFE_INTEGER) || left.id - right.id;
+      })
+      .map((source) => {
       const taxpayer = byTaxCode.get(source.tax_code);
       const statusChange = latestStatusChangeByTaxCode.get(source.tax_code);
       const noteParts = [
@@ -119,6 +127,9 @@ export async function GET(request: Request) {
         previousCheckedAt: formatDate(taxpayer?.previous_checked_at ?? null),
         lastCheckedAt: formatDate(taxpayer?.last_checked_at ?? null),
         note: [...new Set(noteParts)].join(" | "),
+        unitKey: source.source_unit_key ?? null,
+        unitLabel: getTaxpayerUnitDisplayName(source.source_unit_key, source.source_unit_label),
+        unitOrder: Number.isInteger(source.source_unit_order) ? source.source_unit_order : null,
       };
     });
     addTaxpayerWorksheet(workbook, year, exportRows);

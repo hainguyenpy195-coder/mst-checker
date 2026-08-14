@@ -150,6 +150,9 @@ Giữ quan hệ giữa MST và dữ liệu Excel nguồn.
 - `source_sheet text`
 - `source_year text`
 - `source_row integer`
+- `source_unit_key text`
+- `source_unit_label text`
+- `source_unit_order integer`
 - `source_vendor_name text`
 - `source_note text`
 - Ràng buộc duy nhất để tránh nhập trùng khi chạy lại seed.

@@ -22,6 +22,7 @@ import {
 } from "@phosphor-icons/react";
 import { getDashboardHref, getDashboardViewFromPathname, type DashboardView } from "@/lib/dashboard-routes";
 import { isValidTaxCode, normalizeTaxCode, TAX_CODE_FORMAT_HINT, TAX_CODE_INPUT_PATTERN } from "@/lib/tax-code";
+import { getTaxpayerUnitDisplayName, getTaxpayerUnitOrder } from "@/lib/taxpayer-units";
 import type { AppRole } from "@/lib/app-auth";
 import InvoicePanel from "@/components/invoice-panel";
 import TaxpayerExcelImportModal from "@/components/taxpayer-excel-import-modal";
@@ -60,6 +61,9 @@ type TaxpayerRow = {
   source_sheet: string;
   source_year: string | null;
   source_row: number | null;
+  source_unit_key: string | null;
+  source_unit_label: string | null;
+  source_unit_order: number | null;
   source_vendor_name: string | null;
   source_note: string | null;
   taxpayer: TaxpayerDetail | null;
@@ -108,6 +112,24 @@ type TaxCodePreviewResponse = {
 };
 
 type DashboardProps = { username: string; role: AppRole };
+
+function taxpayerUnitKey(row: Pick<TaxpayerRow, "source_unit_key" | "source_unit_label">) {
+  return row.source_unit_key ?? row.source_unit_label ?? "unclassified";
+}
+
+function taxpayerUnitLabel(row: Pick<TaxpayerRow, "source_unit_key" | "source_unit_label">) {
+  return getTaxpayerUnitDisplayName(row.source_unit_key, row.source_unit_label);
+}
+
+function compareTaxpayerRowsByUnit(left: TaxpayerRow, right: TaxpayerRow) {
+  const orderDifference = getTaxpayerUnitOrder(left.source_unit_key, left.source_unit_order)
+    - getTaxpayerUnitOrder(right.source_unit_key, right.source_unit_order);
+  if (orderDifference !== 0) return orderDifference;
+
+  const labelDifference = taxpayerUnitLabel(left).localeCompare(taxpayerUnitLabel(right), "vi");
+  if (labelDifference !== 0) return labelDifference;
+  return (left.source_row ?? Number.MAX_SAFE_INTEGER) - (right.source_row ?? Number.MAX_SAFE_INTEGER) || left.id - right.id;
+}
 
 function waitForTaxpayerBatchRetry(delayMs: number, signal: AbortSignal) {
   return new Promise<void>((resolve) => {
@@ -209,7 +231,7 @@ function statusClass(taxpayer: TaxpayerDetail | null) {
 }
 
 function matchesTaxpayerQuery(row: TaxpayerRow, needle: string) {
-  return !needle || [row.tax_code, row.source_vendor_name, row.taxpayer?.name, row.taxpayer?.status]
+  return !needle || [row.tax_code, row.source_vendor_name, row.source_unit_label, taxpayerUnitLabel(row), row.taxpayer?.name, row.taxpayer?.status]
     .some((value) => value?.toLowerCase().includes(needle));
 }
 
@@ -445,14 +467,15 @@ export default function Dashboard({ username, role }: DashboardProps) {
 
   const filteredRows = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return displayRows.filter((row) => {
+    const result = displayRows.filter((row) => {
       const matchesText = matchesTaxpayerQuery(row, needle);
       const matchesStatus = statusFilter === "all"
         || (statusFilter === "error" && Boolean(row.taxpayer?.last_error))
         || (row.taxpayer?.status_group ?? "unknown") === statusFilter;
       return matchesText && matchesStatus;
     });
-  }, [displayRows, query, statusFilter]);
+    return viewMode === "sheets" ? [...result].sort(compareTaxpayerRowsByUnit) : result;
+  }, [displayRows, query, statusFilter, viewMode]);
 
   const mobileLookupRows = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -997,12 +1020,15 @@ export default function Dashboard({ username, role }: DashboardProps) {
               <table className="data-table">
                 <thead><tr><th className="col-expand" /><th>Mã số thuế</th><th>Tên người nộp thuế</th><th>Năm</th><th>Tình trạng</th><th title="Lần hệ thống tra cứu endpoint gần nhất">Tra cứu lúc</th><th>Nguồn dữ liệu</th></tr></thead>
                 <tbody>
-                  {isLoading ? <TableSkeleton /> : filteredRows.length === 0 ? <tr><td colSpan={7}><div className="table-empty"><FileText size={26} /><strong>Chưa có dữ liệu để hiển thị</strong><span>Dữ liệu sẽ xuất hiện sau khi migration và seed Supabase hoàn tất.</span></div></td></tr> : pagedRows.map((row) => {
+                  {isLoading ? <TableSkeleton /> : filteredRows.length === 0 ? <tr><td colSpan={7}><div className="table-empty"><FileText size={26} /><strong>Chưa có dữ liệu để hiển thị</strong><span>Dữ liệu sẽ xuất hiện sau khi migration và seed Supabase hoàn tất.</span></div></td></tr> : pagedRows.map((row, rowIndex) => {
                     const detail = row.taxpayer;
                     const isExpanded = expandedRow === row.id;
                     const sourceIsStale = isSourceDataStale(detail?.source_updated_at ?? null);
                     const refreshTitle = `Tra cứu thủ công tại Cục Thuế cho ${row.tax_code}`;
+                    const previousRow = rowIndex > 0 ? pagedRows[rowIndex - 1] : null;
+                    const startsUnitGroup = viewMode === "sheets" && (!previousRow || taxpayerUnitKey(previousRow) !== taxpayerUnitKey(row));
                     return <Fragment key={row.id}>
+                      {startsUnitGroup ? <tr className="unit-group-row"><td colSpan={7}><strong>{taxpayerUnitLabel(row)}</strong><small>Danh sách MST theo đơn vị</small></td></tr> : null}
                       <tr key={row.id} className={`data-row ${isExpanded ? "data-row-expanded" : ""}`} onClick={() => setExpandedRow(isExpanded ? null : row.id)}>
                         <td className="col-expand"><CaretRight size={16} className={isExpanded ? "caret-open" : ""} /></td>
                         <td className="tax-code-cell"><div className="tax-code-with-action"><span>{row.tax_code}</span>{canWrite ? <><button className="row-update-button" type="button" title={refreshTitle} aria-label={refreshTitle} disabled={Boolean(updatingTaxCode) || isStartingManualLookup || Boolean(manualLookup) || isRefreshingAll} onClick={(event) => { event.stopPropagation(); void refreshTaxpayer(row); }}><ArrowsClockwise size={13} className={updatingTaxCode === row.tax_code ? "update-icon-spinning" : ""} /></button><button className="row-delete-button" type="button" title={`Xóa toàn bộ MST ${row.tax_code}`} aria-label={`Xóa toàn bộ MST ${row.tax_code}`} disabled={isDeleting || isRefreshingAll || Boolean(manualLookup)} onClick={(event) => { event.stopPropagation(); openDeleteDialog(row); }}><Trash size={13} /></button></> : null}</div></td>
@@ -1191,12 +1217,13 @@ function MobileTaxpayerCard({ row, canWrite, isExpanded, isUpdating, disableRefr
       <span className="mobile-result-topline"><span className="mobile-tax-code">{row.tax_code}</span><CaretRight size={18} className={isExpanded ? "caret-open" : ""} /></span>
       <strong>{name}</strong>
       <span className="mobile-result-status"><span className={statusClass(detail)}>{statusLabel(detail)}</span>{sourceIsStale ? <em>Dữ liệu nguồn cũ</em> : null}</span>
-      <span className="mobile-result-meta">Năm nguồn: {row.source_sheet} · Tra cứu: {formatDate(detail?.last_checked_at ?? null)}</span>
+      <span className="mobile-result-meta">{taxpayerUnitLabel(row)} · Năm: {row.source_sheet} · Tra cứu: {formatDate(detail?.last_checked_at ?? null)}</span>
     </button>
     {isExpanded ? <div className="mobile-result-detail">
       <dl className="mobile-detail-list">
         <div><dt>Mã số thuế</dt><dd className="mono-value">{row.tax_code}</dd></div>
-        <div><dt>Năm nguồn</dt><dd>{row.source_sheet}</dd></div>
+        <div><dt>Đơn vị</dt><dd>{taxpayerUnitLabel(row)}</dd></div>
+        <div><dt>Năm</dt><dd>{row.source_sheet}</dd></div>
         <div className="mobile-detail-item-wide"><dt>Địa chỉ</dt><dd>{detail?.address ?? "Chưa có"}</dd></div>
         <div><dt>Tra cứu lúc</dt><dd>{formatDate(detail?.last_checked_at ?? null)}</dd></div>
         <div><dt>Nguồn dữ liệu</dt><dd>{formatSourceDate(detail?.source_updated_at ?? null)}</dd></div>
@@ -1239,7 +1266,7 @@ function ActivitySkeleton() {
 
 function DetailPanel({ row }: { row: TaxpayerRow }) {
   const detail = row.taxpayer;
-  return <div className="detail-panel"><div className="detail-title"><div><span>CHI TIẾT MST</span><h3>{detail?.name ?? row.source_vendor_name ?? "Chưa có tên"}</h3></div><span className={statusClass(detail)}>{statusLabel(detail)}</span></div><div className="detail-grid"><DetailItem label="Mã số thuế" value={row.tax_code} mono /><DetailItem label="Năm theo dõi" value={row.source_year ?? row.source_sheet} /><DetailItem label="Loại tổ chức" value={detail?.org_type} /><DetailItem label="Cơ quan thuế" value={detail?.tax_department} /><DetailItem label="Địa chỉ" value={detail?.address} wide /><DetailItem label="Dữ liệu lấy từ cục thuế lúc" value={formatDate(detail?.source_updated_at ?? null)} /><DetailItem label="Tra cứu lần trước" value={formatDate(detail?.previous_checked_at ?? null)} /><DetailItem label="Tra cứu lúc" value={formatDate(detail?.last_checked_at ?? null)} /></div>{detail?.last_error ? <div className="detail-error"><WarningCircle size={16} /> {detail.last_error}</div> : null}</div>;
+  return <div className="detail-panel"><div className="detail-title"><div><span>CHI TIẾT MST</span><h3>{detail?.name ?? row.source_vendor_name ?? "Chưa có tên"}</h3></div><span className={statusClass(detail)}>{statusLabel(detail)}</span></div><div className="detail-grid"><DetailItem label="Mã số thuế" value={row.tax_code} mono /><DetailItem label="Đơn vị" value={taxpayerUnitLabel(row)} /><DetailItem label="Năm theo dõi" value={row.source_year ?? row.source_sheet} /><DetailItem label="Loại tổ chức" value={detail?.org_type} /><DetailItem label="Cơ quan thuế" value={detail?.tax_department} /><DetailItem label="Địa chỉ" value={detail?.address} wide /><DetailItem label="Dữ liệu lấy từ cục thuế lúc" value={formatDate(detail?.source_updated_at ?? null)} /><DetailItem label="Tra cứu lần trước" value={formatDate(detail?.previous_checked_at ?? null)} /><DetailItem label="Tra cứu lúc" value={formatDate(detail?.last_checked_at ?? null)} /></div>{detail?.last_error ? <div className="detail-error"><WarningCircle size={16} /> {detail.last_error}</div> : null}</div>;
 }
 
 function DetailItem({ label, value, mono = false, wide = false }: { label: string; value: string | null | undefined; mono?: boolean; wide?: boolean }) {

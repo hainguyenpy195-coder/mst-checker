@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
 import { isValidTaxCode, normalizeTaxCode } from "@/lib/tax-code";
+import { resolveTaxpayerUnit, type TaxpayerUnitInfo } from "@/lib/taxpayer-units";
 
 export const DEFAULT_TAXPAYER_EXCEL_MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 export const DEFAULT_TAXPAYER_EXCEL_MAX_ROWS = 10_000;
@@ -15,11 +16,17 @@ export const TAXPAYER_EXCEL_HEADERS = [
 ] as const;
 
 const YEAR_PATTERN = /^\d{4}$/;
+const MONTH_YEAR_SHEET_PATTERN = /^T(?:0?[1-9]|1[0-2])-(\d{4})$/i;
+const SHORT_MONTH_YEAR_SHEET_PATTERN = /^T(?:0?[1-9]|1[0-2])-(\d{2})$/i;
+const INVALID_SHEET_NAME_MESSAGE = "tên sheet phải là năm 4 chữ số hoặc dạng T{tháng}-{năm}, ví dụ T2-2026";
 
 export type TaxpayerExcelSource = {
   sourceSheet: string;
   sourceYear: string;
   sourceRow: number;
+  sourceUnitKey: string | null;
+  sourceUnitLabel: string | null;
+  sourceUnitOrder: number | null;
 };
 
 export type TaxpayerExcelCandidate = {
@@ -51,7 +58,21 @@ export type TaxpayerWorkbookExportRow = {
   previousCheckedAt: string;
   lastCheckedAt: string;
   note: string;
+  unitKey: string | null;
+  unitLabel: string | null;
+  unitOrder: number | null;
 };
+
+export function parseTaxpayerExcelSheetYear(sheetName: string): string | null {
+  const normalizedName = sheetName.trim();
+  if (YEAR_PATTERN.test(normalizedName)) return normalizedName;
+
+  const fullYearMatch = normalizedName.match(MONTH_YEAR_SHEET_PATTERN);
+  if (fullYearMatch) return fullYearMatch[1];
+
+  const shortYearMatch = normalizedName.match(SHORT_MONTH_YEAR_SHEET_PATTERN);
+  return shortYearMatch ? `20${shortYearMatch[1]}` : null;
+}
 
 export function getTaxpayerExcelMaxUploadBytes() {
   const configured = Number(process.env.MST_IMPORT_MAX_UPLOAD_BYTES ?? DEFAULT_TAXPAYER_EXCEL_MAX_UPLOAD_BYTES);
@@ -134,6 +155,17 @@ function findHeader(worksheet: ExcelJS.Worksheet) {
   return null;
 }
 
+const UNIT_MARKER_PATTERN = /^(?:I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII|XVIII|XIX|XX)\.?$/i;
+
+function findUnitHeading(worksheet: ExcelJS.Worksheet, rowNumber: number, taxCodeColumn: number): TaxpayerUnitInfo | null {
+  const row = worksheet.getRow(rowNumber);
+  const marker = cellText(row.getCell(1).value);
+  const label = cellText(row.getCell(2).value);
+  const taxCode = cellText(row.getCell(taxCodeColumn).value);
+  if (!label || taxCode || !UNIT_MARKER_PATTERN.test(marker)) return null;
+  return resolveTaxpayerUnit(label, marker);
+}
+
 export async function parseTaxpayerWorkbook(buffer: Buffer | Uint8Array): Promise<TaxpayerExcelParseResult> {
   const workbook = new ExcelJS.Workbook();
   const workbookBuffer = buffer as unknown as Parameters<typeof workbook.xlsx.load>[0];
@@ -149,9 +181,9 @@ export async function parseTaxpayerWorkbook(buffer: Buffer | Uint8Array): Promis
   const maxRows = getTaxpayerExcelMaxRows();
 
   for (const worksheet of workbook.worksheets) {
-    const sourceYear = worksheet.name.trim();
-    if (!YEAR_PATTERN.test(sourceYear)) {
-      ignoredSheets.push(`${worksheet.name} (tên sheet phải là năm 4 chữ số)`);
+    const sourceYear = parseTaxpayerExcelSheetYear(worksheet.name);
+    if (!sourceYear) {
+      ignoredSheets.push(`${worksheet.name} (${INVALID_SHEET_NAME_MESSAGE})`);
       continue;
     }
 
@@ -161,8 +193,15 @@ export async function parseTaxpayerWorkbook(buffer: Buffer | Uint8Array): Promis
       continue;
     }
 
+    let currentUnit: TaxpayerUnitInfo | null = null;
     const lastRowNumber = worksheet.lastRow?.number ?? worksheet.rowCount;
     for (let rowNumber = header.rowNumber + 1; rowNumber <= lastRowNumber; rowNumber += 1) {
+      const unitHeading = findUnitHeading(worksheet, rowNumber, header.taxCodeColumn);
+      if (unitHeading) {
+        currentUnit = unitHeading;
+        continue;
+      }
+
       const row = worksheet.getRow(rowNumber);
       const rawTaxCode = cellText(row.getCell(header.taxCodeColumn).value);
       if (!rawTaxCode) continue;
@@ -188,9 +227,12 @@ export async function parseTaxpayerWorkbook(buffer: Buffer | Uint8Array): Promis
 
       validRows += 1;
       const source: TaxpayerExcelSource = {
-        sourceSheet: worksheet.name,
+        sourceSheet: sourceYear,
         sourceYear,
         sourceRow: rowNumber,
+        sourceUnitKey: currentUnit?.key ?? null,
+        sourceUnitLabel: currentUnit?.sourceLabel ?? null,
+        sourceUnitOrder: currentUnit?.order ?? null,
       };
       const current = candidates.get(taxCode);
       if (current) {
@@ -245,9 +287,28 @@ export function addTaxpayerWorksheet(workbook: ExcelJS.Workbook, year: string, r
   ];
   worksheet.getColumn(4).hidden = true;
 
-  rows.forEach((row, index) => {
+  let previousUnitKey: string | null = null;
+  let dataIndex = 0;
+  rows.forEach((row) => {
+    const unitKey = row.unitKey ?? row.unitLabel ?? "unclassified";
+    if (unitKey !== previousUnitKey) {
+      const unitRow = worksheet.addRow([
+        row.unitOrder && row.unitOrder <= 100 ? toRomanNumeral(row.unitOrder) : "",
+        row.unitLabel || "Chưa phân loại",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+      ]);
+      unitRow.font = { name: "Arial", size: 10, bold: true, color: { argb: "FF0B5F8A" } };
+      unitRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE7F4FA" } };
+      previousUnitKey = unitKey;
+    }
+
     const worksheetRow = worksheet.addRow([
-      index + 1,
+      dataIndex + 1,
       row.name,
       row.taxCode,
       "",
@@ -258,10 +319,24 @@ export function addTaxpayerWorksheet(workbook: ExcelJS.Workbook, year: string, r
     ]);
     worksheetRow.alignment = { vertical: "top", wrapText: true };
     worksheetRow.font = { name: "Arial", size: 10 };
-    if (index % 2 === 1) worksheetRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF7FAFC" } };
+    if (dataIndex % 2 === 1) worksheetRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF7FAFC" } };
+    dataIndex += 1;
   });
 
   return worksheet;
+}
+
+function toRomanNumeral(value: number) {
+  const pairs: Array<[number, string]> = [[10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]];
+  let remainder = Math.max(1, Math.floor(value));
+  let result = "";
+  for (const [amount, symbol] of pairs) {
+    while (remainder >= amount) {
+      result += symbol;
+      remainder -= amount;
+    }
+  }
+  return result;
 }
 
 export function createTaxpayerTemplateWorkbook(year = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Ho_Chi_Minh", year: "numeric" }).format(new Date())) {

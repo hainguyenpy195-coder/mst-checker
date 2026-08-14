@@ -51,11 +51,25 @@ function parseCandidates(value: unknown): { candidates?: TaxpayerExcelCandidate[
       const sourceSheet = readText(sourceRecord.sourceSheet, 31);
       const sourceYear = readText(sourceRecord.sourceYear, 4);
       const sourceRow = Number(sourceRecord.sourceRow);
-      if (!sourceSheet || !sourceYear || !YEAR_PATTERN.test(sourceYear) || sourceSheet !== sourceYear || !Number.isInteger(sourceRow) || sourceRow < 3) {
+      const sourceUnitKey = readText(sourceRecord.sourceUnitKey, 80);
+      const sourceUnitLabel = readText(sourceRecord.sourceUnitLabel, 120);
+      const sourceUnitOrderValue = sourceRecord.sourceUnitOrder === null || sourceRecord.sourceUnitOrder === undefined
+        ? null
+        : Number(sourceRecord.sourceUnitOrder);
+      if (!sourceSheet || !sourceYear || !YEAR_PATTERN.test(sourceYear) || sourceSheet !== sourceYear || !Number.isInteger(sourceRow) || sourceRow < 3
+        || (sourceUnitKey && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(sourceUnitKey))
+        || (sourceUnitOrderValue !== null && (!Number.isInteger(sourceUnitOrderValue) || sourceUnitOrderValue < 1 || sourceUnitOrderValue > 100))) {
         return { error: `Nguồn dữ liệu của MST ${taxCode} có năm hoặc dòng Excel không hợp lệ.` };
       }
 
-      const source: TaxpayerExcelSource = { sourceSheet, sourceYear, sourceRow };
+      const source: TaxpayerExcelSource = {
+        sourceSheet,
+        sourceYear,
+        sourceRow,
+        sourceUnitKey,
+        sourceUnitLabel,
+        sourceUnitOrder: sourceUnitOrderValue,
+      };
       const isDuplicateSource = candidate.sources.some((current) => current.sourceSheet === source.sourceSheet && current.sourceRow === source.sourceRow);
       if (!isDuplicateSource) candidate.sources.push(source);
     }
@@ -131,16 +145,19 @@ export async function POST(request: Request) {
   }
 
   const existingTaxCodes = new Set((existingResult.data as TaxpayerCodeRecord[]).map((row) => row.tax_code));
-  const newCandidates = parsed.candidates.filter((candidate) => !existingTaxCodes.has(candidate.taxCode));
+  const existingCandidates = parsed.candidates.filter((candidate) => existingTaxCodes.has(candidate.taxCode));
   let addedTaxCodes: string[] = [];
   let sourceCount = 0;
-  if (newCandidates.length) {
-    const rows = newCandidates.map((candidate) => ({
+  if (parsed.candidates.length) {
+    const rows = parsed.candidates.map((candidate) => ({
       tax_code: candidate.taxCode,
       sources: candidate.sources.map((source) => ({
         source_sheet: source.sourceSheet,
         source_year: source.sourceYear,
         source_row: source.sourceRow,
+        source_unit_key: source.sourceUnitKey,
+        source_unit_label: source.sourceUnitLabel,
+        source_unit_order: source.sourceUnitOrder,
       })),
     }));
     const { data, error } = await supabase.rpc("import_taxpayer_batch", {
@@ -155,10 +172,7 @@ export async function POST(request: Request) {
     addedTaxCodes = (Array.isArray(data) ? data : [])
       .map((row) => (row && typeof row === "object" ? (row as { tax_code?: unknown }).tax_code : null))
       .filter((taxCode): taxCode is string => typeof taxCode === "string");
-    const addedSet = new Set(addedTaxCodes);
-    sourceCount = newCandidates
-      .filter((candidate) => addedSet.has(candidate.taxCode))
-      .reduce((count, candidate) => count + candidate.sources.length, 0);
+    sourceCount = parsed.candidates.reduce((count, candidate) => count + candidate.sources.length, 0);
   }
 
   const storedAddedTaxCodes = Array.isArray(importSession.added_tax_codes)
@@ -185,7 +199,8 @@ export async function POST(request: Request) {
     totalCandidates: candidates.length,
     addedTaxCodes,
     addedCount: allAddedTaxCodes.length,
-    skippedCount: parsed.candidates.length - addedTaxCodes.length,
+    skippedCount: Math.max(0, parsed.candidates.length - addedTaxCodes.length - existingCandidates.length),
+    existingCount: existingCandidates.length,
     sourceCount,
   }, { status: 201 });
 }

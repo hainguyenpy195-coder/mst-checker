@@ -103,14 +103,17 @@ export async function POST(request: Request) {
   }
 
   const existingTaxCodes = new Set((existingResult.data as TaxpayerCodeRecord[]).map((row) => row.tax_code));
-  const candidates = parsed.candidates.filter((candidate) => !existingTaxCodes.has(candidate.taxCode));
+  // Keep existing MST candidates as well: their source rows may belong to a
+  // new year or unit and must be recorded for yearly reports.
+  const candidates = parsed.candidates;
+  const newCandidateCount = candidates.filter((candidate) => !existingTaxCodes.has(candidate.taxCode)).length;
   const counts = {
     totalRows: parsed.totalRows,
     validRows: parsed.validRows,
     duplicateRows: parsed.duplicateRows,
     invalidRows: parsed.invalidRowCount,
     existing: existingTaxCodes.size,
-    new: candidates.length,
+    new: newCandidateCount,
   };
   const sourceYears = [...new Set(candidates.flatMap((candidate) => candidate.sources.map((source) => source.sourceYear)))].sort();
 
@@ -142,7 +145,7 @@ export async function POST(request: Request) {
     invalidRows: parsed.invalidRows,
     ignoredSheets: parsed.ignoredSheets,
     message: candidates.length
-      ? `Phát hiện ${candidates.length.toLocaleString("vi-VN")} MST chưa có trong cơ sở dữ liệu.`
-      : "Không tìm thấy MST mới chưa có trong cơ sở dữ liệu.",
+      ? `Đã đọc ${newCandidateCount.toLocaleString("vi-VN")} MST mới và ghi nhận nguồn dữ liệu cho ${existingTaxCodes.size.toLocaleString("vi-VN")} MST đã có.`
+      : "Không tìm thấy MST hợp lệ trong file Excel.",
   }, { headers: { "cache-control": "no-store" } });
 }

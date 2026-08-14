@@ -39,6 +39,8 @@ type CommitResponse = {
   addedTaxCodes?: string[];
   addedCount?: number;
   skippedCount?: number;
+  existingCount?: number;
+  sourceCount?: number;
   error?: string;
 };
 
@@ -272,7 +274,7 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
 
   function renderSelectStep() {
     return <>
-      <p className="taxpayer-import-description">Chọn file Excel có các worksheet đặt tên theo năm, ví dụ <strong>2023</strong>, <strong>2024</strong>, <strong>2025</strong>.</p>
+      <p className="taxpayer-import-description">Chọn file Excel có các worksheet đặt tên theo năm hoặc kỳ cập nhật, ví dụ <strong>2026</strong>, <strong>T2-2026</strong>, <strong>T6-2026</strong>.</p>
       <div className="taxpayer-import-file-picker">
         <input ref={fileInputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => chooseFile(event.target.files?.[0] ?? null)} />
         <FileText size={22} weight="duotone" />
@@ -280,7 +282,7 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
         <span>{file ? `${(file.size / 1024).toFixed(1)} KiB` : "Định dạng hỗ trợ: .xlsx"}</span>
         <button className="outline-button" type="button" onClick={() => fileInputRef.current?.click()}>Chọn file</button>
       </div>
-      <p className="taxpayer-import-template-link"><DownloadSimple size={16} /><a href="/api/taxpayers/import/template">Tải file Excel mẫu</a><span>— dùng tên sheet là năm để phân loại dữ liệu</span></p>
+      <p className="taxpayer-import-template-link"><DownloadSimple size={16} /><a href="/api/taxpayers/import/template">Tải file Excel mẫu</a><span>— dùng tên sheet là năm hoặc T&#123;tháng&#125;-&#123;năm&#125; để phân loại dữ liệu</span></p>
       {isReading ? <div className="taxpayer-import-uploading" role="status" aria-live="polite"><ArrowsClockwise size={17} className="update-icon-spinning" /> <span>Đang upload file excel</span></div> : null}
       {error ? <div className="confirm-error"><WarningCircle size={16} /> {error}</div> : null}
     </>;
@@ -293,7 +295,7 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
     return <>
       <div className="taxpayer-import-summary-grid">
         <div><strong>{formatCount(counts?.new ?? candidates.length)}</strong><span>MST chưa có trong CSDL</span></div>
-        <div><strong>{formatCount(counts?.existing ?? 0)}</strong><span>MST đã tồn tại, bỏ qua</span></div>
+        <div><strong>{formatCount(counts?.existing ?? 0)}</strong><span>MST đã tồn tại, ghi nhận nguồn</span></div>
         <div><strong>{formatCount(counts?.duplicateRows ?? 0)}</strong><span>Dòng trùng trong file</span></div>
         <button
           className={`taxpayer-import-summary-card${invalidRows.length ? " is-clickable" : ""}`}
@@ -307,8 +309,8 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
           {invalidRows.length ? <small>{showInvalidRows ? "Ẩn chi tiết" : "Xem chi tiết"}</small> : null}
         </button>
       </div>
-      <div className="taxpayer-import-message" role="status"><CheckCircle size={18} /> {preview?.message ?? `Phát hiện ${formatCount(candidates.length)} MST chưa có trong cơ sở dữ liệu.`}</div>
-      {candidates.length ? <div className="taxpayer-import-candidate-list"><strong>Một số MST sẽ được thêm</strong><div className="taxpayer-import-candidate-scroll">{candidates.slice(0, 30).map((candidate) => <div className="taxpayer-import-candidate-row" key={candidate.taxCode}><span className="mono-value">{candidate.taxCode}</span><span>{[...new Set(candidate.sources.map((source) => source.sourceYear))].join(", ")}</span></div>)}</div>{candidates.length > 30 ? <small>Đang hiển thị 30/{formatCount(candidates.length)} MST.</small> : null}</div> : null}
+      <div className="taxpayer-import-message" role="status"><CheckCircle size={18} /> {preview?.message ?? `Đã đọc ${formatCount(candidates.length)} MST và nguồn dữ liệu.`}</div>
+      {candidates.length ? <div className="taxpayer-import-candidate-list"><strong>Một số MST sẽ được đồng bộ nguồn dữ liệu</strong><div className="taxpayer-import-candidate-scroll">{candidates.slice(0, 30).map((candidate) => <div className="taxpayer-import-candidate-row" key={candidate.taxCode}><span className="mono-value">{candidate.taxCode}</span><span>{[...new Set(candidate.sources.map((source) => source.sourceYear))].join(", ")}</span></div>)}</div>{candidates.length > 30 ? <small>Đang hiển thị 30/{formatCount(candidates.length)} MST.</small> : null}</div> : null}
       {preview?.ignoredSheets?.length ? <div className="taxpayer-import-warning"><WarningCircle size={16} /><span>Sheet bị bỏ qua: {preview.ignoredSheets.join("; ")}</span></div> : null}
       {invalidRows.length ? <div className="taxpayer-import-warning"><WarningCircle size={16} /><span>Đã bỏ qua {formatCount(invalidRowCount)} dòng MST không hợp lệ. Bấm vào ô “Dòng không hợp lệ” để xem chi tiết.</span></div> : null}
       {showInvalidRows && invalidRows.length ? <div className="taxpayer-import-invalid-details">
@@ -328,7 +330,7 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
 
   function renderProgressStep() {
     const label = phase === "adding"
-      ? `Đang thêm ${formatCount(progress.current)}/${formatCount(progress.total)} MST mới`
+      ? `Đang đồng bộ ${formatCount(progress.current)}/${formatCount(progress.total)} MST`
       : `Đang cập nhật ${formatCount(progress.current)}/${formatCount(progress.total)} MST từ endpoint...`;
     const percent = progress.total ? Math.round(progress.current / progress.total * 100) : 0;
     return <div className="taxpayer-import-progress" role="status" aria-live="polite">
@@ -341,7 +343,9 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
 
   function renderCompleteStep() {
     if (!summary) return null;
-    const message = summary.failedCount
+    const message = !summary.addedCount
+      ? "Đã hoàn tất ghi nhận nguồn dữ liệu Excel cho các MST đã có trong hệ thống."
+      : summary.failedCount
       ? `Đã hoàn tất nhập Excel. Đã thêm ${formatCount(summary.addedCount)} MST mới và cập nhật thành công ${formatCount(summary.updatedCount)}/${formatCount(summary.addedCount)} thông tin MST; còn ${formatCount(summary.failedCount)} MST cần thử lại.`
       : `Đã hoàn tất nhập Excel. Đã thêm ${formatCount(summary.addedCount)} MST mới và cập nhật thành công ${formatCount(summary.updatedCount)} thông tin MST từ endpoint.`;
     return <div className="taxpayer-import-complete" role="status"><CheckCircle size={36} weight="duotone" /><strong>{message}</strong>{refreshErrors.length ? <div className="taxpayer-import-warning"><WarningCircle size={16} /><span>{refreshErrors.slice(0, 3).join("; ")}</span></div> : null}</div>;
@@ -359,7 +363,7 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
       <div className="confirm-actions">
         {isBusy || isReading ? null : <button className="outline-button" type="button" onClick={handleClose}>{phase === "complete" || phase === "error" || !file ? "Đóng" : "Hủy"}</button>}
         {phase === "select" ? <button className="export-button" type="button" disabled={!file || isReading || Boolean(file && file.size > TAXPAYER_IMPORT_STORAGE_MAX_BYTES)} onClick={() => void readAndFilterFile()}>{isReading ? "Đang upload file excel" : "Đọc và lọc MST"}</button> : null}
-        {phase === "preview" && candidates.length ? <button className="export-button" type="button" onClick={() => void startImport()}>Xác nhận thêm {formatCount(candidates.length)} MST</button> : null}
+        {phase === "preview" && candidates.length ? <button className="export-button" type="button" onClick={() => void startImport()}>Xác nhận đồng bộ {formatCount(candidates.length)} MST</button> : null}
       </div>
     </section>
   </div>;

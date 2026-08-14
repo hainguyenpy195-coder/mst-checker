@@ -116,6 +116,54 @@ function findColumn(header, patterns) {
   });
 }
 
+const UNIT_MARKER_PATTERN = /^(?:I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII|XVIII|XIX|XX)\.?$/i;
+const UNIT_DEFINITIONS = new Map([
+  ["xuong dvkt", { key: "xuong-dvkt", order: 1 }],
+  ["xuong dich vu ky thuat", { key: "xuong-dvkt", order: 1 }],
+  ["phong tckt", { key: "phong-tckt", order: 2 }],
+  ["phong khkd", { key: "phong-khkd", order: 3 }],
+  ["phong ktatcl", { key: "phong-ktatcl", order: 4 }],
+  ["phong ncpt", { key: "phong-ncpt", order: 5 }],
+  ["phong tccbld", { key: "phong-tccbld", order: 6 }],
+  ["tt huan luyen cns", { key: "tt-huan-luyen-cns", order: 7 }],
+  ["vpct", { key: "vpct", order: 8 }],
+]);
+
+function normalizeUnitLabel(value) {
+  return text(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function romanNumeralToNumber(value) {
+  const roman = text(value).replace(/\.$/, "").toUpperCase();
+  const values = { I: 1, V: 5, X: 10, L: 50, C: 100 };
+  let total = 0;
+  let previous = 0;
+  for (const character of [...roman].reverse()) {
+    const current = values[character] ?? 0;
+    total += current < previous ? -current : current;
+    previous = current;
+  }
+  return total > 0 ? total : null;
+}
+
+function resolveSourceUnit(marker, label) {
+  const sourceLabel = text(label);
+  const definition = UNIT_DEFINITIONS.get(normalizeUnitLabel(sourceLabel));
+  const generatedKey = normalizeUnitLabel(sourceLabel).replace(/\s+/g, "-");
+  const key = definition?.key ?? (generatedKey || "unclassified");
+  return {
+    key,
+    label: sourceLabel,
+    order: definition?.order ?? romanNumeralToNumber(marker),
+  };
+}
+
 function parseSheet(dbYear, worksheet) {
   const rows = [];
   worksheet.eachRow({ includeEmpty: true }, (row) => {
@@ -141,12 +189,18 @@ function parseSheet(dbYear, worksheet) {
 
   const records = [];
   const issues = [];
+  let currentUnit = null;
 
   rows.slice(headerIndex + 1).forEach((row, offset) => {
     const sourceRow = headerIndex + offset + 2;
     const rawTaxCode = text(row[taxCodeColumn]);
     const taxCode = normalizeTaxCode(rawTaxCode);
     const vendorName = nameColumn >= 0 ? text(row[nameColumn]) : "";
+
+    if (UNIT_MARKER_PATTERN.test(text(row[0])) && text(row[1]) && !taxCode) {
+      currentUnit = resolveSourceUnit(row[0], row[1]);
+      return;
+    }
 
     // Ignore blank/layout rows and section headings without a tax code.
     if (!taxCode) return;
@@ -161,6 +215,9 @@ function parseSheet(dbYear, worksheet) {
       sourceSheet: dbYear,
       sourceYear: dbYear,
       sourceRow,
+      sourceUnitKey: currentUnit?.key ?? null,
+      sourceUnitLabel: currentUnit?.label ?? null,
+      sourceUnitOrder: currentUnit?.order ?? null,
       vendorName,
       orgType: orgTypeColumn >= 0 ? text(row[orgTypeColumn]) : "",
       status: statusColumn >= 0 ? text(row[statusColumn]) : "",
@@ -215,7 +272,7 @@ async function createSql(inputPath, outputPath) {
 
   for (const record of allRecords) {
     lines.push(
-      `insert into public.taxpayer_sources (tax_code, source_sheet, source_year, source_row, source_vendor_name, source_note) values (${sqlText(record.taxCode)}, ${sqlText(record.sourceSheet)}, ${sqlText(record.sourceYear)}, ${record.sourceRow}, ${sqlText(record.vendorName)}, ${sqlText(record.note)}) on conflict (tax_code, source_sheet, source_row) do update set source_vendor_name = excluded.source_vendor_name, source_note = excluded.source_note;`,
+      `insert into public.taxpayer_sources (tax_code, source_sheet, source_year, source_row, source_unit_key, source_unit_label, source_unit_order, source_vendor_name, source_note) values (${sqlText(record.taxCode)}, ${sqlText(record.sourceSheet)}, ${sqlText(record.sourceYear)}, ${record.sourceRow}, ${sqlText(record.sourceUnitKey)}, ${sqlText(record.sourceUnitLabel)}, ${record.sourceUnitOrder ?? "null"}, ${sqlText(record.vendorName)}, ${sqlText(record.note)}) on conflict (tax_code, source_sheet, source_row) do update set source_unit_key = excluded.source_unit_key, source_unit_label = excluded.source_unit_label, source_unit_order = excluded.source_unit_order, source_vendor_name = excluded.source_vendor_name, source_note = excluded.source_note;`,
     );
   }
 

@@ -221,6 +221,9 @@ button:not(:disabled):active { transform: translateY(1px); }
 .data-table td { padding: 15px 13px; color: var(--ink-soft); border-bottom: 1px solid var(--line-soft); font-size: 12px; vertical-align: middle; }
 .data-table .data-row { cursor: pointer; transition: background 150ms ease; }
 .data-table .data-row:hover, .data-table .data-row-expanded { background: var(--surface-hover); }
+.data-table .unit-group-row td { padding: 11px 13px 9px; color: var(--accent-dark); background: var(--accent-soft); border-bottom: 1px solid var(--accent-border); }
+.data-table .unit-group-row strong { display: block; color: var(--accent-dark); font-size: 12px; font-weight: 720; }
+.data-table .unit-group-row small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; font-weight: 550; }
 .data-table td strong { display: block; color: var(--ink); font-size: 13px; font-weight: 650; letter-spacing: -0.012em; }
 .data-table td small { display: block; max-width: 270px; margin-top: 4px; overflow: hidden; color: var(--muted); font-size: 11px; font-weight: 450; text-overflow: ellipsis; white-space: nowrap; }
 .data-table td small.stale-source-label { max-width: none; overflow: visible; color: var(--muted); font-style: italic; }
