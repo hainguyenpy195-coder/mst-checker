@@ -10,6 +10,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import type { TaxpayerExcelCandidate } from "@/lib/taxpayer-excel";
+import { TAXPAYER_IMPORT_STORAGE_MAX_BYTES } from "@/lib/taxpayer-import";
 
 type ImportPhase = "select" | "preview" | "adding" | "refreshing" | "complete" | "error";
 
@@ -90,7 +91,7 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
     setFile(nextFile);
     setImportId(null);
     setPreview(null);
-    setError(null);
+    setError(nextFile && nextFile.size > TAXPAYER_IMPORT_STORAGE_MAX_BYTES ? "File excel phải dưới 20MB" : null);
     setRefreshErrors([]);
     setSummary(null);
     setPhase("select");
@@ -98,6 +99,10 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
 
   async function readAndFilterFile() {
     if (!file || phase === "select" && !file) return;
+    if (file.size > TAXPAYER_IMPORT_STORAGE_MAX_BYTES) {
+      setError("File excel phải dưới 20MB");
+      return;
+    }
     setPhase("select");
     setIsReading(true);
     setError(null);
@@ -277,6 +282,7 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
         <button className="outline-button" type="button" onClick={() => fileInputRef.current?.click()}>Chọn file</button>
       </div>
       <p className="taxpayer-import-template-link"><DownloadSimple size={16} /><a href="/api/taxpayers/import/template">Tải file Excel mẫu</a><span>— dùng tên sheet là năm để phân loại dữ liệu</span></p>
+      {isReading ? <div className="taxpayer-import-uploading" role="status" aria-live="polite"><ArrowsClockwise size={17} className="update-icon-spinning" /> <span>Đang upload file excel</span></div> : null}
       {error ? <div className="confirm-error"><WarningCircle size={16} /> {error}</div> : null}
     </>;
   }
@@ -329,7 +335,7 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
       {phase === "error" ? <div className="taxpayer-import-error"><WarningCircle size={30} weight="duotone" /><strong>{error ?? "Nhập Excel chưa hoàn tất."}</strong><span>Các MST đã thêm vẫn được giữ trong cơ sở dữ liệu và có thể được cập nhật lại sau.</span></div> : null}
       <div className="confirm-actions">
         {isBusy || isReading ? null : <button className="outline-button" type="button" onClick={handleClose}>{phase === "complete" || phase === "error" || !file ? "Đóng" : "Hủy"}</button>}
-        {phase === "select" ? <button className="export-button" type="button" disabled={!file || isReading} onClick={() => void readAndFilterFile()}>{isReading ? "Đang đọc..." : "Đọc và lọc MST"}</button> : null}
+        {phase === "select" ? <button className="export-button" type="button" disabled={!file || isReading || Boolean(file && file.size > TAXPAYER_IMPORT_STORAGE_MAX_BYTES)} onClick={() => void readAndFilterFile()}>{isReading ? "Đang upload file excel" : "Đọc và lọc MST"}</button> : null}
         {phase === "preview" && candidates.length ? <button className="export-button" type="button" onClick={() => void startImport()}>Xác nhận thêm {formatCount(candidates.length)} MST</button> : null}
       </div>
     </section>

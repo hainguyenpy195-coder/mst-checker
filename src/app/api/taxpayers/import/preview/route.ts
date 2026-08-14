@@ -71,7 +71,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 400 });
   }
   if (buffer.length > maxBytes) {
-    const message = `File vượt quá giới hạn ${(maxBytes / 1024 / 1024).toFixed(0)} MiB.`;
+    const message = "File excel phải dưới 20MB";
     await markImportFailed(supabase, importSession.id, message);
     await deleteTaxpayerImportFile(supabase, importSession.storage_path);
     return NextResponse.json({ error: message }, { status: 413 });

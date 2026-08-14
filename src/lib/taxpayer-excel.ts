@@ -134,6 +134,7 @@ export async function parseTaxpayerWorkbook(buffer: Buffer | Uint8Array): Promis
   let validRows = 0;
   let duplicateRows = 0;
   let invalidRowCount = 0;
+  const maxRows = getTaxpayerExcelMaxRows();
 
   for (const worksheet of workbook.worksheets) {
     const sourceYear = worksheet.name.trim();
@@ -155,8 +156,8 @@ export async function parseTaxpayerWorkbook(buffer: Buffer | Uint8Array): Promis
       if (!rawTaxCode) continue;
 
       totalRows += 1;
-      if (totalRows > getTaxpayerExcelMaxRows()) {
-        throw new Error(`File Excel vượt quá giới hạn ${getTaxpayerExcelMaxRows().toLocaleString("vi-VN")} dòng dữ liệu.`);
+      if (totalRows > maxRows) {
+        throw new Error(`File excel phải dưới ${maxRows} dòng mã số thuế`);
       }
 
       const taxCode = normalizeTaxCode(rawTaxCode);

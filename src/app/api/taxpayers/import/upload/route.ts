@@ -17,10 +17,6 @@ export const maxDuration = 30;
 
 const XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
-function formatMiB(bytes: number) {
-  return (bytes / 1024 / 1024).toFixed(0);
-}
-
 export async function POST(request: Request) {
   const session = await authenticateRequest(request);
   if (!session) return NextResponse.json({ error: "Bạn cần đăng nhập." }, { status: 401 });
@@ -50,7 +46,7 @@ export async function POST(request: Request) {
 
   const maxBytes = Math.min(getTaxpayerExcelMaxUploadBytes(), TAXPAYER_IMPORT_STORAGE_MAX_BYTES);
   if (fileSize > maxBytes) {
-    return NextResponse.json({ error: `File vượt quá giới hạn ${formatMiB(maxBytes)} MiB.` }, { status: 413 });
+    return NextResponse.json({ error: "File excel phải dưới 20MB" }, { status: 413 });
   }
 
   const importId = crypto.randomUUID();
