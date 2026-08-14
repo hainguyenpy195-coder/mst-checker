@@ -41,10 +41,8 @@ function parseCandidates(value: unknown): { candidates?: TaxpayerExcelCandidate[
 
     const candidate = grouped.get(taxCode) ?? {
       taxCode,
-      name: readText(record.name, 500),
       sources: [],
     };
-    if (!candidate.name) candidate.name = readText(record.name, 500);
 
     for (const sourceValue of record.sources) {
       if (!sourceValue || typeof sourceValue !== "object") return { error: `Nguồn dữ liệu của MST ${taxCode} không hợp lệ.` };
@@ -60,8 +58,6 @@ function parseCandidates(value: unknown): { candidates?: TaxpayerExcelCandidate[
         sourceSheet,
         sourceYear,
         sourceRow,
-        sourceVendorName: readText(sourceRecord.sourceVendorName, 500),
-        sourceNote: readText(sourceRecord.sourceNote, 2000),
       };
       const isDuplicateSource = candidate.sources.some((current) => current.sourceSheet === source.sourceSheet && current.sourceRow === source.sourceRow);
       if (!isDuplicateSource) candidate.sources.push(source);
@@ -109,13 +105,10 @@ export async function POST(request: Request) {
 
   const rows = candidates.map((candidate) => ({
     tax_code: candidate.taxCode,
-    name: candidate.name,
     sources: candidate.sources.map((source) => ({
       source_sheet: source.sourceSheet,
       source_year: source.sourceYear,
       source_row: source.sourceRow,
-      source_vendor_name: source.sourceVendorName,
-      source_note: source.sourceNote,
     })),
   }));
   const { data, error } = await supabase.rpc("import_taxpayer_batch", {

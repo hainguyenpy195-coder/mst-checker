@@ -20,13 +20,10 @@ export type TaxpayerExcelSource = {
   sourceSheet: string;
   sourceYear: string;
   sourceRow: number;
-  sourceVendorName: string | null;
-  sourceNote: string | null;
 };
 
 export type TaxpayerExcelCandidate = {
   taxCode: string;
-  name: string | null;
   sources: TaxpayerExcelSource[];
 };
 
@@ -119,8 +116,6 @@ function findHeader(worksheet: ExcelJS.Worksheet) {
     return {
       rowNumber,
       taxCodeColumn,
-      nameColumn: findColumn(headers, (value) => value === "ten nguoi ban" || value === "ten nguoi nop thue" || value === "ten doanh nghiep"),
-      noteColumn: findColumn(headers, (value) => value.startsWith("ghi chu")),
     };
   }
 
@@ -179,26 +174,20 @@ export async function parseTaxpayerWorkbook(buffer: Buffer | Uint8Array): Promis
       }
 
       validRows += 1;
-      const name = header.nameColumn ? cellText(row.getCell(header.nameColumn).value) || null : null;
-      const note = header.noteColumn ? cellText(row.getCell(header.noteColumn).value) || null : null;
       const source: TaxpayerExcelSource = {
         sourceSheet: worksheet.name,
         sourceYear,
         sourceRow: rowNumber,
-        sourceVendorName: name,
-        sourceNote: note,
       };
       const current = candidates.get(taxCode);
       if (current) {
         duplicateRows += 1;
         current.sources.push(source);
-        if (!current.name && name) current.name = name;
         continue;
       }
 
       candidates.set(taxCode, {
         taxCode,
-        name,
         sources: [source],
       });
     }

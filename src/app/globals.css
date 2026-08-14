@@ -302,7 +302,7 @@ button:not(:disabled):active { transform: translateY(1px); }
 .taxpayer-import-candidate-list { display: grid; gap: 8px; margin-top: 17px; }
 .taxpayer-import-candidate-list > strong { color: var(--ink-soft); font-size: 12px; }
 .taxpayer-import-candidate-scroll { max-height: 220px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
-.taxpayer-import-candidate-row { display: grid; grid-template-columns: 130px minmax(0, 1fr) 100px; gap: 10px; padding: 9px 11px; color: var(--ink-soft); border-bottom: 1px solid var(--line-soft); font-size: 11px; }
+.taxpayer-import-candidate-row { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 10px; padding: 9px 11px; color: var(--ink-soft); border-bottom: 1px solid var(--line-soft); font-size: 11px; }
 .taxpayer-import-candidate-row:last-child { border-bottom: 0; }
 .taxpayer-import-candidate-row:nth-child(even) { background: var(--surface-soft); }
 .taxpayer-import-candidate-list small { color: var(--muted); font-size: 10px; }

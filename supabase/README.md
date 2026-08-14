@@ -72,7 +72,8 @@ configured to bypass XInvoice limits or use rotating proxies.
 
 The administrator can use **Nhập Excel** on the overview or yearly list. Each
 worksheet must be named with a four-digit year, and the importer reads all
-worksheets using the same columns as the export workbook. It filters against
+worksheets using only the `Mã số thuế` column; all other Excel columns are
+ignored. It filters against
 the aggregate `taxpayers` table, creates one taxpayer row per new MST, keeps
 each worksheet year in `taxpayer_sources`, and then refreshes only those new
 MST codes through the worker. Existing MSTs and invalid rows are reported and
