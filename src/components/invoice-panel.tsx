@@ -2,10 +2,12 @@
 
 import { memo, type ChangeEvent, type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowSquareOut,
   ArrowsClockwise,
   CaretLeft,
   CaretRight,
   CheckCircle,
+  Copy,
   FileText,
   MagnifyingGlass,
   Receipt,
@@ -36,22 +38,11 @@ type InvoiceListResponse = {
   error?: string;
 };
 
-type VerificationFields = {
-  sellerTaxCode: string;
-  templateNumber: string;
-  symbol: string;
-  invoiceNumber: string;
-  taxAmount: number | string | null;
-  totalAmount: number | string | null;
-};
-
 type VerificationState = {
   invoice: InvoiceRecord;
   invoiceId: string;
-  challengeId: string;
-  captchaDataUrl: string;
-  fields: VerificationFields;
-  captcha: string;
+  lookupUrl: string;
+  lookupCode: string;
   error: string | null;
   isSubmitting: boolean;
 };
@@ -99,6 +90,15 @@ function effectiveInvoiceIdentity(invoice: Pick<InvoiceRecord, "invoice_template
   };
 }
 
+function safeExternalLookupUrl(value: string) {
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 function statusLabel(status: InvoiceVerificationStatus) {
   return statusMeta[status] ?? statusMeta.unverified;
 }
@@ -123,7 +123,6 @@ export default function InvoicePanel() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [verification, setVerification] = useState<VerificationState | null>(null);
-  const [isStartingVerification, setIsStartingVerification] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const verificationIdRef = useRef<string | null>(null);
 
@@ -214,41 +213,18 @@ export default function InvoicePanel() {
   }
 
   const beginVerification = useCallback(async (invoice: InvoiceRecord) => {
-    if (verificationIdRef.current || isStartingVerification) return;
+    if (verificationIdRef.current) return;
     verificationIdRef.current = invoice.id;
-    setIsStartingVerification(true);
     setError(null);
-    try {
-      const response = await fetch("/api/invoices/" + invoice.id + "/verify", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "start" }),
-      });
-      const payload = await response.json() as {
-        error?: string;
-        challengeId?: string;
-        captchaDataUrl?: string;
-        fields?: VerificationFields;
-      };
-      if (!response.ok) throw new Error(payload.error ?? "Không thể mở phiên CAPTCHA.");
-      if (!payload.challengeId || !payload.captchaDataUrl || !payload.fields) throw new Error("Cục Thuế chưa trả về CAPTCHA.");
-      setVerification({
-        invoice,
-        invoiceId: invoice.id,
-        challengeId: payload.challengeId,
-        captchaDataUrl: payload.captchaDataUrl,
-        fields: payload.fields,
-        captcha: "",
-        error: null,
-        isSubmitting: false,
-      });
-    } catch (verificationError) {
-      verificationIdRef.current = null;
-      setError(verificationError instanceof Error ? verificationError.message : "Không thể mở phiên CAPTCHA.");
-    } finally {
-      setIsStartingVerification(false);
-    }
-  }, [isStartingVerification]);
+    setVerification({
+      invoice,
+      invoiceId: invoice.id,
+      lookupUrl: invoice.lookup_url ?? "",
+      lookupCode: invoice.lookup_code ?? "",
+      error: null,
+      isSubmitting: false,
+    });
+  }, []);
 
   const patchInvoice = useCallback((invoice: InvoiceRecord) => {
     setRows((current) => patchRows(current, invoice));
@@ -262,11 +238,13 @@ export default function InvoicePanel() {
     });
   }, [rows]);
 
-  async function submitVerification() {
+  async function saveLookup() {
     if (!verification || verification.isSubmitting) return;
     const current = verification;
-    if (!current.captcha.trim()) {
-      setVerification((state) => state ? { ...state, error: "Vui lòng nhập mã CAPTCHA." } : state);
+    const lookupUrl = safeExternalLookupUrl(current.lookupUrl);
+    const lookupCode = current.lookupCode.trim();
+    if (!lookupUrl || !lookupCode) {
+      setVerification((state) => state ? { ...state, error: "Vui lòng nhập đúng địa chỉ trang tra cứu và mã tra cứu." } : state);
       return;
     }
 
@@ -275,34 +253,59 @@ export default function InvoicePanel() {
       const response = await fetch("/api/invoices/" + current.invoiceId + "/verify", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "submit", challengeId: current.challengeId, captcha: current.captcha }),
+        body: JSON.stringify({ action: "save-lookup", lookupUrl, lookupCode }),
       });
       const payload = await response.json() as {
         error?: string;
-        captchaDataUrl?: string;
         invoice?: InvoiceRecord;
       };
-      if (payload.invoice) patchInvoice(payload.invoice);
-      if (!response.ok) {
-        if (payload.captchaDataUrl) {
-          setVerification((state) => state ? {
-            ...state,
-            captchaDataUrl: payload.captchaDataUrl ?? state.captchaDataUrl,
-            captcha: "",
-            error: payload.error ?? "Mã CAPTCHA chưa đúng.",
-            isSubmitting: false,
-          } : state);
-          return;
-        }
-        throw new Error(payload.error ?? "Không thể đối chiếu hóa đơn.");
-      }
-      verificationIdRef.current = null;
-      setVerification(null);
-      setNotice(payload.invoice?.verification_message ?? "Đã cập nhật tình trạng hóa đơn.");
-    } catch (submitError) {
+      if (!response.ok || !payload.invoice) throw new Error(payload.error ?? "Không thể lưu thông tin tra cứu hóa đơn.");
+      patchInvoice(payload.invoice);
       setVerification((state) => state ? {
         ...state,
-        error: submitError instanceof Error ? submitError.message : "Không thể đối chiếu hóa đơn.",
+        invoice: payload.invoice ?? state.invoice,
+        lookupUrl: payload.invoice?.lookup_url ?? lookupUrl,
+        lookupCode: payload.invoice?.lookup_code ?? lookupCode,
+        error: null,
+        isSubmitting: false,
+      } : state);
+      setNotice("Đã lưu địa chỉ và mã tra cứu hóa đơn.");
+    } catch (saveError) {
+      setVerification((state) => state ? {
+        ...state,
+        error: saveError instanceof Error ? saveError.message : "Không thể lưu thông tin tra cứu hóa đơn.",
+        isSubmitting: false,
+      } : state);
+    }
+  }
+
+  async function recordVerification(status: "valid" | "invalid") {
+    if (!verification || verification.isSubmitting) return;
+    const current = verification;
+    const lookupUrl = safeExternalLookupUrl(current.lookupUrl);
+    const lookupCode = current.lookupCode.trim();
+    if (!lookupUrl || !lookupCode) {
+      setVerification((state) => state ? { ...state, error: "Vui lòng nhập và lưu đầy đủ thông tin tra cứu trước." } : state);
+      return;
+    }
+
+    setVerification((state) => state ? { ...state, error: null, isSubmitting: true } : state);
+    try {
+      const response = await fetch("/api/invoices/" + current.invoiceId + "/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "record", status, lookupUrl, lookupCode }),
+      });
+      const payload = await response.json() as { error?: string; invoice?: InvoiceRecord };
+      if (!response.ok || !payload.invoice) throw new Error(payload.error ?? "Không thể cập nhật tình trạng hóa đơn.");
+      patchInvoice(payload.invoice);
+      verificationIdRef.current = null;
+      setVerification(null);
+      setNotice(payload.invoice.verification_message ?? "Đã cập nhật tình trạng hóa đơn.");
+    } catch (recordError) {
+      setVerification((state) => state ? {
+        ...state,
+        error: recordError instanceof Error ? recordError.message : "Không thể cập nhật tình trạng hóa đơn.",
         isSubmitting: false,
       } : state);
     }
@@ -390,14 +393,14 @@ export default function InvoicePanel() {
         <table className="data-table invoice-data-table">
           <thead><tr><th>Số hóa đơn</th><th>Nhà cung cấp / MST</th><th>Ký hiệu · Mẫu số</th><th>Tiền thuế</th><th>Tổng tiền</th><th>Tình trạng</th><th>Import lúc</th></tr></thead>
           <tbody>
-            {isLoading ? <InvoiceTableSkeleton /> : rows.length === 0 ? <tr><td colSpan={7}><div className="table-empty"><FileText size={26} /><strong>Chưa có hóa đơn</strong><span>Chọn file ở khu vực import để bắt đầu trích xuất.</span></div></td></tr> : rows.map((invoice) => <InvoiceTableRow key={invoice.id} invoice={invoice} isBusy={verificationIdRef.current === invoice.id || isStartingVerification} onVerify={beginVerification} />)}
+            {isLoading ? <InvoiceTableSkeleton /> : rows.length === 0 ? <tr><td colSpan={7}><div className="table-empty"><FileText size={26} /><strong>Chưa có hóa đơn</strong><span>Chọn file ở khu vực import để bắt đầu trích xuất.</span></div></td></tr> : rows.map((invoice) => <InvoiceTableRow key={invoice.id} invoice={invoice} isBusy={verificationIdRef.current === invoice.id} onVerify={beginVerification} />)}
           </tbody>
         </table>
       </div>
       <div className="table-footer"><span>{PAGE_SIZE} dòng/trang</span><div className="pagination-controls" aria-label="Phân trang hóa đơn"><button className="pagination-button" type="button" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={page <= 1}><CaretLeft size={16} /></button><span>Trang {page} / {totalPages}</span><button className="pagination-button" type="button" onClick={() => setPage((value) => Math.min(totalPages, value + 1))} disabled={page >= totalPages}><CaretRight size={16} /></button></div></div>
     </section>
 
-    {verification ? <InvoiceVerificationDialog state={verification} onChange={setVerification} onClose={closeVerification} onRefresh={() => { const invoice = verification.invoice; verificationIdRef.current = null; setVerification(null); void beginVerification(invoice); }} onSubmit={() => void submitVerification()} /> : null}
+    {verification ? <InvoiceVerificationDialog state={verification} onChange={setVerification} onClose={closeVerification} onSave={() => void saveLookup()} onRecord={(status) => void recordVerification(status)} /> : null}
   </section>;
 }
 
@@ -414,10 +417,10 @@ type InvoiceTableRowProps = {
 const InvoiceTableRow = memo(function InvoiceTableRow({ invoice, isBusy, onVerify }: InvoiceTableRowProps) {
   const status = statusLabel(invoice.verification_status);
   const identity = effectiveInvoiceIdentity(invoice);
-  const canVerify = Boolean(invoice.seller_tax_code && identity.templateNumber && identity.symbol && invoice.invoice_number);
+  const canVerify = Boolean(invoice.invoice_number);
   return <tr className="data-row invoice-data-row">
     <td className="invoice-number-cell">
-      <div className="invoice-number-action"><strong>{invoice.invoice_number}</strong><button className="invoice-verify-button" type="button" disabled={!canVerify || isBusy} title={canVerify ? "Đối chiếu với Cục Thuế" : "Thiếu MST, mẫu số/ký hiệu hoặc số hóa đơn"} onClick={() => onVerify(invoice)}><ShieldCheck size={15} /> {isBusy ? "Đang mở" : "Đối chiếu"}</button></div>
+      <div className="invoice-number-action"><strong>{invoice.invoice_number}</strong><button className="invoice-verify-button" type="button" disabled={!canVerify || isBusy} title={canVerify ? "Mở thông tin tra cứu của nhà cung cấp" : "Thiếu số hóa đơn"} onClick={() => onVerify(invoice)}><ShieldCheck size={15} /> {isBusy ? "Đang mở" : "Đối chiếu"}</button></div>
       {invoice.verification_message ? <small title={invoice.verification_message}>{invoice.verification_message}</small> : null}
     </td>
     <td><strong>{invoice.seller_name ?? "Chưa có tên"}</strong><small className="mono-value">{invoice.seller_tax_code ?? "Chưa có MST"}</small></td>
@@ -437,34 +440,49 @@ function InvoiceVerificationDialog({
   state,
   onChange,
   onClose,
-  onRefresh,
-  onSubmit,
+  onSave,
+  onRecord,
 }: {
   state: VerificationState;
   onChange: (state: VerificationState | null) => void;
   onClose: () => void;
-  onRefresh: () => void;
-  onSubmit: () => void;
+  onSave: () => void;
+  onRecord: (status: "valid" | "invalid") => void;
 }) {
-  const setField = (field: "captcha", value: string) => onChange({ ...state, [field]: value, error: null });
+  const [isCopied, setIsCopied] = useState(false);
+  const updateField = (field: "lookupUrl" | "lookupCode", value: string) => onChange({ ...state, [field]: value, error: null });
+  const lookupUrl = safeExternalLookupUrl(state.lookupUrl);
+  const canRecord = Boolean(lookupUrl && state.lookupCode.trim());
+
+  async function copyLookupCode() {
+    if (!state.lookupCode.trim()) return;
+    try {
+      await navigator.clipboard.writeText(state.lookupCode.trim());
+      setIsCopied(true);
+      window.setTimeout(() => setIsCopied(false), 1800);
+    } catch {
+      onChange({ ...state, error: "Không thể sao chép mã tra cứu. Bạn có thể bôi đen và sao chép thủ công." });
+    }
+  }
+
   return <div className="confirm-backdrop">
     <section className="confirm-dialog invoice-verification-dialog" role="dialog" aria-modal="true" aria-labelledby="invoice-verification-title">
-      <div className="manual-lookup-heading"><div className="confirm-dialog-icon manual-lookup-icon"><ShieldCheck size={22} weight="duotone" /></div><button className="icon-button" type="button" aria-label="Đóng xác minh hóa đơn" disabled={state.isSubmitting} onClick={onClose}><X size={17} /></button></div>
-      <h2 id="invoice-verification-title">Đối chiếu hóa đơn với Cục Thuế</h2>
-      <p>Hệ thống đã điền sẵn thông tin tra cứu. Bạn chỉ cần nhập CAPTCHA trong ảnh rồi bấm đối chiếu.</p>
+      <div className="manual-lookup-heading"><div className="confirm-dialog-icon manual-lookup-icon"><ShieldCheck size={22} weight="duotone" /></div><button className="icon-button" type="button" aria-label="Đóng thông tin đối chiếu hóa đơn" disabled={state.isSubmitting} onClick={onClose}><X size={17} /></button></div>
+      <h2 id="invoice-verification-title">Đối chiếu hóa đơn</h2>
+      <p>Thông tin dưới đây được lấy từ hóa đơn. Mở đúng trang tra cứu của đơn vị phát hành; CAPTCHA sẽ hiển thị theo quy trình riêng của từng nhà cung cấp.</p>
       <div className="invoice-prefill-grid">
-        <InvoicePrefill label="MST người bán" value={state.fields.sellerTaxCode} mono />
-        <InvoicePrefill label="Mẫu số" value={state.fields.templateNumber} />
-        <InvoicePrefill label="Ký hiệu" value={state.fields.symbol} />
-        <InvoicePrefill label="Số hóa đơn" value={state.fields.invoiceNumber} mono />
-        <InvoicePrefill label="Tiền thuế" value={formatAmount(state.fields.taxAmount)} />
-        <InvoicePrefill label="Tổng tiền" value={formatAmount(state.fields.totalAmount)} />
+        <InvoicePrefill label="Số hóa đơn" value={state.invoice.invoice_number} mono />
+        <InvoicePrefill label="Nhà cung cấp" value={state.invoice.seller_name ?? "—"} />
+        <label className="invoice-prefill invoice-prefill-editable"><span>Địa chỉ trang tra cứu</span><input value={state.lookupUrl} onChange={(event) => updateField("lookupUrl", event.target.value)} disabled={state.isSubmitting} placeholder="https://..." inputMode="url" /></label>
+        <label className="invoice-prefill invoice-prefill-editable"><span>Mã tra cứu</span><div className="invoice-code-input"><input value={state.lookupCode} onChange={(event) => updateField("lookupCode", event.target.value)} disabled={state.isSubmitting} placeholder="Mã tra cứu trên hóa đơn" /><button className="icon-button" type="button" aria-label="Sao chép mã tra cứu" title={isCopied ? "Đã sao chép" : "Sao chép mã tra cứu"} disabled={!state.lookupCode.trim() || state.isSubmitting} onClick={() => void copyLookupCode()}>{isCopied ? <CheckCircle size={16} /> : <Copy size={16} />}</button></div></label>
       </div>
-      <div className="manual-captcha-box invoice-captcha-box"><img src={state.captchaDataUrl} alt="Mã CAPTCHA từ trang tra cứu hóa đơn Cục Thuế" /><button className="outline-button" type="button" disabled={state.isSubmitting} onClick={onRefresh}><ArrowsClockwise size={15} /> Mã khác</button></div>
-      <label className="manual-captcha-input"><span>Mã xác nhận CAPTCHA</span><input value={state.captcha} onChange={(event) => setField("captcha", event.target.value)} disabled={state.isSubmitting} autoComplete="off" autoFocus maxLength={10} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onSubmit(); } }} /></label>
+      <div className="invoice-provider-actions">
+        {lookupUrl ? <a className="outline-button invoice-provider-link" href={lookupUrl} target="_blank" rel="noreferrer"><ArrowSquareOut size={15} /> Mở trang tra cứu</a> : <button className="outline-button invoice-provider-link" type="button" disabled><ArrowSquareOut size={15} /> Mở trang tra cứu</button>}
+        <button className="outline-button" type="button" disabled={state.isSubmitting || !canRecord} onClick={onSave}>Lưu thông tin</button>
+      </div>
       {state.error ? <div className="confirm-error"><WarningCircle size={16} /> {state.error}</div> : null}
-      <p className="invoice-tax-note">Kết quả được gửi trực tiếp tới trang tra cứu hóa đơn điện tử của Tổng cục Thuế và lưu lại cho đúng dòng hóa đơn này.</p>
-      <div className="confirm-actions"><button className="outline-button" type="button" disabled={state.isSubmitting} onClick={onClose}>Hủy</button><button className="export-button" type="button" disabled={state.isSubmitting} onClick={onSubmit}>{state.isSubmitting ? "Đang đối chiếu..." : "Đối chiếu"}</button></div>
+      <p className="invoice-tax-note">Sau khi xem kết quả trên trang nhà cung cấp, chọn trạng thái bên dưới. Hệ thống chỉ cập nhật dòng hóa đơn này.</p>
+      <div className="confirm-actions invoice-verification-actions"><button className="outline-button" type="button" disabled={state.isSubmitting} onClick={onClose}>Hủy</button><button className="danger-button" type="button" disabled={state.isSubmitting || !canRecord} onClick={() => onRecord("invalid")}>{state.isSubmitting ? "Đang lưu..." : "Không hợp lệ"}</button><button className="export-button" type="button" disabled={state.isSubmitting || !canRecord} onClick={() => onRecord("valid")}>{state.isSubmitting ? "Đang lưu..." : "Hợp lệ"}</button></div>
     </section>
   </div>;
 }

@@ -8,6 +8,8 @@ export type InvoiceRecord = {
   seller_name: string | null;
   invoice_template_number: string | null;
   invoice_symbol: string | null;
+  lookup_url: string | null;
+  lookup_code: string | null;
   invoice_date: string | null;
   tax_amount: number | string | null;
   total_amount: number | string | null;

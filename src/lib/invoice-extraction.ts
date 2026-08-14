@@ -39,6 +39,8 @@ export type InvoiceExtraction = {
   seller_name: string | null;
   invoice_template_number: string | null;
   invoice_symbol: string | null;
+  lookup_url: string | null;
+  lookup_code: string | null;
   invoice_number: string | null;
   invoice_date: string | null;
   tax_amount: number | null;
@@ -66,6 +68,8 @@ const invoiceExtractionSchema = z.object({
   seller_name: nullableText,
   invoice_template_number: nullableText,
   invoice_symbol: nullableText,
+  lookup_url: nullableText,
+  lookup_code: nullableText,
   invoice_number: nullableText,
   invoice_date: nullableText,
   tax_amount: nullableAmount,
@@ -117,6 +121,25 @@ function cleanOptionalText(value: string | null | undefined) {
 export function normalizeInvoiceSymbol(value: string | null | undefined) {
   const normalized = (value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
   return cleanOptionalText(normalized);
+}
+
+export function normalizeInvoiceLookupUrl(value: string | null | undefined) {
+  const normalized = cleanOptionalText(value)?.replace(/\s+/g, "");
+  if (!normalized) return null;
+
+  const candidate = /^https?:\/\//i.test(normalized) ? normalized : "https://" + normalized;
+  try {
+    const url = new URL(candidate);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+export function normalizeInvoiceLookupCode(value: string | null | undefined) {
+  const normalized = cleanOptionalText(value);
+  return normalized ? normalized.replace(/\s+/g, "") : null;
 }
 
 export function normalizeInvoiceTemplateAndSymbol(templateNumber: string | null | undefined, symbol: string | null | undefined) {
@@ -181,9 +204,10 @@ function extractionPrompt(fileName: string, kind: InvoiceFileDescriptor["kind"])
   return [
     "Bạn là bộ phận kiểm tra hóa đơn điện tử tại Việt Nam.",
     "Đọc chính xác nội dung hóa đơn trong file đính kèm, không suy đoán và không tự điền dữ liệu không nhìn thấy.",
-    "Trích xuất các trường: mã số thuế người bán, tên người bán, mẫu số, ký hiệu hóa đơn, số hóa đơn, ngày hóa đơn, tiền thuế, tổng tiền thanh toán, loại tiền tệ.",
+    "Trích xuất các trường: mã số thuế người bán, tên người bán, mẫu số, ký hiệu hóa đơn, số hóa đơn, ngày hóa đơn, tiền thuế, tổng tiền thanh toán, loại tiền tệ, địa chỉ trang tra cứu hóa đơn và mã tra cứu.",
     "Một số hóa đơn in chung trường Mẫu số/Ký hiệu, ví dụ 1C26MCM hoặc 1K26DAB. Hãy tách ký tự số đầu tiên thành mẫu số (1), phần còn lại thành ký hiệu (C26MCM hoặc K26DAB). Nếu chỉ in Ký hiệu nhưng có dạng 1K26DAB thì cũng tách theo quy tắc này.",
     "Số hóa đơn phải giữ nguyên các số 0 ở đầu. Các khoản tiền trả về dạng số, không có dấu phân cách.",
+    "Địa chỉ trang tra cứu thường nằm ở cuối hóa đơn với nhãn Website tra cứu hóa đơn, Tra cứu hóa đơn điện tử hoặc tương tự; giữ nguyên URL http/https. Mã tra cứu có thể có nhãn Mã tra cứu, Mã số tra cứu, Mã nhận HĐ, Mã kiểm tra hoặc tương tự; giữ nguyên chính xác chuỗi mã.",
     "extracted_text phải là phần text nhìn thấy trên hóa đơn, trình bày ngắn gọn nhưng đủ để kiểm tra lại.",
     "Nếu không thấy trường nào thì trả về null. Chỉ trả về dữ liệu theo schema structured output.",
     "Tên file: " + fileName + ". Loại file: " + kind + ".",
@@ -233,6 +257,8 @@ export function normalizeExtractedInvoice(extraction: InvoiceExtraction) {
     seller_name: cleanOptionalText(extraction.seller_name),
     invoice_template_number: identity.templateNumber,
     invoice_symbol: identity.symbol,
+    lookup_url: normalizeInvoiceLookupUrl(extraction.lookup_url),
+    lookup_code: normalizeInvoiceLookupCode(extraction.lookup_code),
     invoice_date: cleanOptionalText(extraction.invoice_date),
     tax_amount: extraction.tax_amount,
     total_amount: extraction.total_amount,

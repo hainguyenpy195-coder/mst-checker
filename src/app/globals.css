@@ -333,8 +333,17 @@ button:not(:disabled):active { transform: translateY(1px); }
 .invoice-prefill { display: grid; gap: 4px; min-width: 0; padding: 9px 10px; background: var(--surface-soft); border: 1px solid var(--line-soft); border-radius: 9px; }
 .invoice-prefill span { color: var(--muted); font-size: 10px; }
 .invoice-prefill strong { overflow: hidden; color: var(--ink); font-size: 12px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
+.invoice-prefill-editable { align-content: start; }
+.invoice-prefill-editable input { width: 100%; min-width: 0; min-height: 31px; padding: 0 8px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 7px; outline: 0; font-size: 11px; }
+.invoice-prefill-editable input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.invoice-code-input { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.invoice-code-input input { flex: 1; }
+.invoice-code-input .icon-button { flex: 0 0 31px; width: 31px; height: 31px; }
 .invoice-verification-dialog { width: min(100%, 610px); max-height: min(92dvh, 760px); overflow-y: auto; }
-.invoice-captcha-box { margin-top: 16px; }
+.invoice-provider-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 16px; }
+.invoice-provider-actions > * { flex: 1 1 210px; }
+.invoice-provider-link { text-decoration: none; }
+.invoice-verification-actions { flex-wrap: wrap; }
 .invoice-tax-note { color: var(--muted) !important; font-size: 11px !important; line-height: 1.5 !important; }
 
 /* Mobile-only views are mounted with the dashboard so they can reuse its state. */

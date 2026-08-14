@@ -35,6 +35,7 @@ Mở `http://localhost:3000`.
   - `supabase/migrations/202608130008_manual_refresh_only.sql`
   - `supabase/migrations/202608130009_manual_gdt_lookup_sessions.sql`
   - `supabase/migrations/202608140001_invoices.sql`
+  - `supabase/migrations/202608140002_invoice_provider_lookup.sql`
 3. Tạo seed cục bộ từ workbook:
 
    ```powershell
@@ -63,10 +64,12 @@ hạn, đồng thời không xoá các trường mà VietQR không cung cấp.
 Tab **Hóa đơn** nhận PDF, XML và hình ảnh tối đa 4 MiB mỗi file. AI Gateway dùng
 model `google/gemini-2.5-flash` để trích xuất thông tin, chống trùng theo số hóa
 đơn và giới hạn 200 lượt quét mỗi tháng qua `INVOICE_MONTHLY_SCAN_LIMIT`.
-Đối chiếu Cục Thuế là luồng bán tự động: hệ thống chuẩn bị dữ liệu và CAPTCHA,
-người dùng nhập CAPTCHA thủ công, sau đó kết quả chỉ cập nhật đúng dòng hóa đơn
-đang được đối chiếu. Với hóa đơn in chung trường mẫu số/ký hiệu, hệ thống tách
-`1K26DAB` thành mẫu số `1` và ký hiệu `K26DAB` trước khi gửi Cục Thuế.
+Đối chiếu hóa đơn dùng địa chỉ và mã tra cứu được in trên từng hóa đơn. Modal
+điền sẵn hai thông tin này, mở trang tra cứu của đúng nhà cung cấp ở tab mới để
+người dùng hoàn thành loại CAPTCHA riêng của nhà cung cấp, sau đó chọn kết quả.
+Kết quả chỉ cập nhật đúng dòng hóa đơn đang được đối chiếu. Với hóa đơn in chung
+trường mẫu số/ký hiệu, hệ thống tách `1K26DAB` thành mẫu số `1` và ký hiệu
+`K26DAB` cho phần dữ liệu nội bộ.
 
 ## Kiểm tra
 

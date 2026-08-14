@@ -6,6 +6,8 @@ export const INVOICE_SELECT = [
   "seller_name",
   "invoice_template_number",
   "invoice_symbol",
+  "lookup_url",
+  "lookup_code",
   "invoice_date",
   "tax_amount",
   "total_amount",
