@@ -14,6 +14,7 @@ import {
   Plus,
   Receipt,
   SignOut,
+  Stop,
   SquaresFour,
   Table,
   Trash,
@@ -87,6 +88,35 @@ type TaxpayerBatchResponse = {
   error?: string;
 };
 
+type RefreshAllProgress = {
+  total: number;
+  completed: number;
+  pending: number;
+  running: number;
+  cancelled: number;
+  etaSeconds: number | null;
+};
+
+type RefreshAllResponse = {
+  error?: string;
+  done?: boolean;
+  stopped?: boolean;
+  processed?: number;
+  skipped?: number;
+  cancelled?: number;
+  total?: number;
+  completed?: number;
+  pending?: number;
+  queue?: {
+    total?: number;
+    completed?: number;
+    pending?: number;
+    running?: number;
+    dead_letter?: number;
+    cancelled?: number;
+  };
+};
+
 type DeleteTarget = { taxCode: string; name: string | null };
 type ManualLookupState = {
   taxCode: string;
@@ -122,6 +152,20 @@ type TaxCodePreviewResponse = {
 };
 
 type DashboardProps = { username: string; role: AppRole };
+
+function formatCount(value: number) {
+  return Math.max(0, value).toLocaleString("vi-VN");
+}
+
+function formatRefreshEta(seconds: number | null) {
+  if (seconds === null || !Number.isFinite(seconds)) return "Đang tính thời gian còn lại";
+  const totalMinutes = Math.ceil(Math.max(0, seconds) / 60);
+  if (totalMinutes < 1) return "dưới 1 phút";
+  if (totalMinutes < 60) return `${totalMinutes} phút`;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes ? `${hours} giờ ${minutes} phút` : `${hours} giờ`;
+}
 
 function taxpayerUnitKey(row: Pick<TaxpayerRow, "source_unit_key" | "source_unit_label" | "source_unit_marker">) {
   const key = row.source_unit_key ?? row.source_unit_label ?? "unclassified";
@@ -310,7 +354,8 @@ export default function Dashboard({ username, role }: DashboardProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isRefreshingAll, setIsRefreshingAll] = useState(false);
-  const [refreshAllProgress, setRefreshAllProgress] = useState<{ processed: number; pending: number } | null>(null);
+  const [isStoppingRefreshAll, setIsStoppingRefreshAll] = useState(false);
+  const [refreshAllProgress, setRefreshAllProgress] = useState<RefreshAllProgress | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [updatingTaxCode, setUpdatingTaxCode] = useState<string | null>(null);
   const [isStartingManualLookup, setIsStartingManualLookup] = useState(false);
@@ -335,6 +380,10 @@ export default function Dashboard({ username, role }: DashboardProps) {
   const taxCodeLookupSequence = useRef(0);
   const taxCodeLookupRequest = useRef<{ taxCode: string; promise: Promise<TaxCodeLookupResult> } | null>(null);
   const refreshAllLock = useRef(false);
+  const refreshAllAbortController = useRef<AbortController | null>(null);
+  const refreshAllStopRequested = useRef(false);
+  const refreshAllStartedAt = useRef<number | null>(null);
+  const refreshAllInitialCompleted = useRef<number | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const dataLoadController = useRef<AbortController | null>(null);
 
@@ -663,62 +712,127 @@ export default function Dashboard({ username, role }: DashboardProps) {
     }
   }
 
-  function waitForManualRefresh() {
-    return new Promise<void>((resolve) => window.setTimeout(resolve, MANUAL_REFRESH_INTERVAL_MS));
+  function waitForManualRefresh(signal: AbortSignal) {
+    return new Promise<boolean>((resolve) => {
+      if (signal.aborted) {
+        resolve(false);
+        return;
+      }
+
+      const timeout = window.setTimeout(() => {
+        signal.removeEventListener("abort", handleAbort);
+        resolve(true);
+      }, MANUAL_REFRESH_INTERVAL_MS);
+      const handleAbort = () => {
+        window.clearTimeout(timeout);
+        resolve(false);
+      };
+      signal.addEventListener("abort", handleAbort, { once: true });
+    });
   }
 
   async function refreshAllTaxpayers() {
     if (!canWrite || refreshAllLock.current) return;
 
     refreshAllLock.current = true;
+    const controller = new AbortController();
+    refreshAllAbortController.current = controller;
+    refreshAllStopRequested.current = false;
+    refreshAllStartedAt.current = Date.now();
+    refreshAllInitialCompleted.current = null;
     setIsRefreshingAll(true);
-    setRefreshAllProgress({ processed: 0, pending: 0 });
+    setIsStoppingRefreshAll(false);
+    setRefreshAllProgress({ total: 0, completed: 0, pending: 0, running: 0, cancelled: 0, etaSeconds: null });
     setError(null);
     setNotice(null);
 
     let mode: "start" | "continue" = "start";
-    let processedTotal = 0;
     let skippedTotal = 0;
     try {
       while (true) {
+        if (controller.signal.aborted || refreshAllStopRequested.current) break;
+
         const response = await fetch("/api/taxpayers/refresh-all", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ mode }),
           cache: "no-store",
+          signal: controller.signal,
         });
-        const payload = await response.json() as {
-          error?: string;
-          done?: boolean;
-          processed?: number;
-          pending?: number;
-          skipped?: number;
-          queue?: { dead_letter?: number };
-        };
+        const payload = await response.json() as RefreshAllResponse;
         if (!response.ok && response.status !== 202) throw new Error(payload.error ?? "Không thể bắt đầu cập nhật toàn bộ.");
 
-        processedTotal += payload.processed ?? 0;
         skippedTotal += payload.skipped ?? 0;
-        const pending = payload.pending ?? 0;
-        setRefreshAllProgress({ processed: processedTotal, pending });
+        if (refreshAllStopRequested.current || controller.signal.aborted) break;
+
+        const total = payload.total ?? payload.queue?.total ?? 0;
+        const completed = payload.completed ?? payload.queue?.completed ?? Math.max(0, total - (payload.pending ?? payload.queue?.pending ?? 0));
+        const pending = payload.pending ?? payload.queue?.pending ?? 0;
+        const running = payload.queue?.running ?? 0;
+        const cancelled = payload.queue?.cancelled ?? 0;
+        if (refreshAllInitialCompleted.current === null) refreshAllInitialCompleted.current = completed;
+        const elapsedSeconds = Math.max(0, (Date.now() - (refreshAllStartedAt.current ?? Date.now())) / 1000);
+        const progressSinceStart = Math.max(0, completed - (refreshAllInitialCompleted.current ?? completed));
+        const rate = elapsedSeconds > 0 ? progressSinceStart / elapsedSeconds : 0;
+        const etaSeconds = rate > 0 ? Math.ceil(Math.max(0, total - completed) / rate) : null;
+        setRefreshAllProgress({ total, completed, pending, running, cancelled, etaSeconds });
+
         if (payload.done || pending === 0) {
           await loadData();
           const deadLetterCount = payload.queue?.dead_letter ?? 0;
           const skippedMessage = skippedTotal ? ` Bỏ qua ${skippedTotal.toLocaleString("vi-VN")} MST vì dữ liệu endpoint cũ hơn DB.` : "";
           setNotice(deadLetterCount
-            ? `Đã xử lý xong hàng đợi. Còn ${deadLetterCount.toLocaleString("vi-VN")} MST lỗi cần kiểm tra lại.${skippedMessage}`
-            : `Đã cập nhật toàn bộ ${processedTotal.toLocaleString("vi-VN")} lượt MST.${skippedMessage}`);
+            ? `Đã xử lý xong ${formatCount(completed)}/${formatCount(total)} MST. Còn ${formatCount(deadLetterCount)} MST lỗi cần kiểm tra lại.${skippedMessage}`
+            : `Đã cập nhật xong ${formatCount(completed)}/${formatCount(total)} MST.${skippedMessage}`);
           break;
         }
 
         mode = "continue";
-        await waitForManualRefresh();
+        if (!await waitForManualRefresh(controller.signal)) break;
       }
     } catch (refreshAllError) {
-      setError(refreshAllError instanceof Error ? refreshAllError.message : "Không thể cập nhật toàn bộ.");
+      if (!refreshAllStopRequested.current && !controller.signal.aborted) {
+        setError(refreshAllError instanceof Error ? refreshAllError.message : "Không thể cập nhật toàn bộ.");
+      }
     } finally {
       refreshAllLock.current = false;
+      if (refreshAllAbortController.current === controller) refreshAllAbortController.current = null;
       setIsRefreshingAll(false);
+      setIsStoppingRefreshAll(false);
+    }
+  }
+
+  async function stopRefreshAll() {
+    if (!canWrite || !isRefreshingAll || isStoppingRefreshAll) return;
+
+    setIsStoppingRefreshAll(true);
+    try {
+      const response = await fetch("/api/taxpayers/refresh-all", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mode: "stop" }),
+        cache: "no-store",
+      });
+      const payload = await response.json() as RefreshAllResponse;
+      if (!response.ok) throw new Error(payload.error ?? "Không thể dừng cập nhật toàn bộ.");
+
+      refreshAllStopRequested.current = true;
+      refreshAllAbortController.current?.abort();
+
+      const total = payload.total ?? payload.queue?.total ?? refreshAllProgress?.total ?? 0;
+      const completed = payload.completed ?? payload.queue?.completed ?? refreshAllProgress?.completed ?? 0;
+      const pending = payload.pending ?? payload.queue?.pending ?? 0;
+      const running = payload.queue?.running ?? refreshAllProgress?.running ?? 0;
+      const cancelled = payload.queue?.cancelled ?? refreshAllProgress?.cancelled ?? 0;
+      setRefreshAllProgress({ total, completed, pending, running, cancelled, etaSeconds: null });
+      setNotice(running
+        ? `Đã dừng nhận MST mới. ${formatCount(completed)}/${formatCount(total)} MST đã xử lý; còn ${formatCount(running)} MST đang hoàn tất lượt hiện tại.`
+        : `Đã dừng cập nhật tại ${formatCount(completed)}/${formatCount(total)} MST.`);
+      setIsRefreshingAll(false);
+    } catch (stopError) {
+      setError(stopError instanceof Error ? stopError.message : "Không thể dừng cập nhật toàn bộ.");
+    } finally {
+      setIsStoppingRefreshAll(false);
     }
   }
 
@@ -1101,7 +1215,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
 
           {notice ? <div className="page-notice page-notice-success" role="status"><CheckCircle size={18} /> {notice}</div> : null}
 
-          {viewMode === "settings" ? <EndpointSettingsPanel onRefreshAll={() => void refreshAllTaxpayers()} isRefreshingAll={isRefreshingAll} refreshAllProgress={refreshAllProgress} /> : null}
+          {viewMode === "settings" ? <EndpointSettingsPanel onRefreshAll={() => void refreshAllTaxpayers()} onStopRefresh={() => void stopRefreshAll()} isRefreshingAll={isRefreshingAll} isStoppingRefreshAll={isStoppingRefreshAll} refreshAllProgress={refreshAllProgress} /> : null}
 
           {viewMode === "activity" ? <ActivityPanel rows={activityRows} isLoading={isActivityLoading} error={activityError} /> : null}
 
@@ -1388,11 +1502,13 @@ function DetailItem({ label, value, mono = false, wide = false }: { label: strin
 
 type EndpointSettingsPanelProps = {
   onRefreshAll: () => void;
+  onStopRefresh: () => void;
   isRefreshingAll: boolean;
-  refreshAllProgress: { processed: number; pending: number } | null;
+  isStoppingRefreshAll: boolean;
+  refreshAllProgress: RefreshAllProgress | null;
 };
 
-function EndpointSettingsPanel({ onRefreshAll, isRefreshingAll, refreshAllProgress }: EndpointSettingsPanelProps) {
+function EndpointSettingsPanel({ onRefreshAll, onStopRefresh, isRefreshingAll, isStoppingRefreshAll, refreshAllProgress }: EndpointSettingsPanelProps) {
   const [primaryEndpoint, setPrimaryEndpoint] = useState("");
   const [fallbackEndpoint, setFallbackEndpoint] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -1442,7 +1558,19 @@ function EndpointSettingsPanel({ onRefreshAll, isRefreshingAll, refreshAllProgre
     }
   }
 
-  return <section className="settings-panel" aria-labelledby="endpoint-settings-title"><div className="settings-heading"><h2 id="endpoint-settings-title">Endpoint</h2><button className="outline-button" type="button" onClick={onRefreshAll} disabled={isRefreshingAll}><ArrowsClockwise size={17} className={isRefreshingAll ? "update-icon-spinning" : ""} /> {isRefreshingAll ? `Đang cập nhật${refreshAllProgress ? ` (${refreshAllProgress.processed} / còn ${refreshAllProgress.pending})` : "..."}` : "Cập nhật toàn bộ"}</button></div>{isLoading ? <div className="settings-loading">Đang tải cấu hình...</div> : <form className="settings-form" onSubmit={saveSettings}><label><span>Endpoint chính</span><input value={primaryEndpoint} onChange={(event) => setPrimaryEndpoint(event.target.value)} placeholder="https://.../{taxCode}" required /></label><label><span>Endpoint dự phòng</span><input value={fallbackEndpoint} onChange={(event) => setFallbackEndpoint(event.target.value)} placeholder="https://.../{taxCode}" required /></label><div className="settings-actions"><button className="export-button" type="submit" disabled={isSaving}>{isSaving ? "Đang lưu..." : "Lưu cấu hình"}</button></div>{settingsError ? <p className="settings-error"><WarningCircle size={16} /> {settingsError}</p> : null}{settingsMessage ? <p className="settings-success"><CheckCircle size={16} /> {settingsMessage}</p> : null}</form>}</section>;
+  const progressPercent = refreshAllProgress?.total ? Math.min(100, Math.round(refreshAllProgress.completed / refreshAllProgress.total * 100)) : 0;
+  return <section className="settings-panel" aria-labelledby="endpoint-settings-title">
+    <div className="settings-heading">
+      <h2 id="endpoint-settings-title">Endpoint</h2>
+      {isRefreshingAll ? <button className="danger-button" type="button" onClick={onStopRefresh} disabled={isStoppingRefreshAll}><Stop size={17} /> {isStoppingRefreshAll ? "Đang dừng..." : "Dừng cập nhật"}</button> : <button className="outline-button" type="button" onClick={onRefreshAll}><ArrowsClockwise size={17} /> Cập nhật toàn bộ</button>}
+    </div>
+    {isRefreshingAll && refreshAllProgress ? <div className="refresh-all-progress" role="status" aria-live="polite">
+      <div className="refresh-all-progress-heading"><strong>Tiến trình cập nhật toàn bộ</strong><span>{refreshAllProgress.total ? `${formatCount(refreshAllProgress.completed)}/${formatCount(refreshAllProgress.total)} MST` : "Đang lấy tổng số MST..."}</span></div>
+      <div className="refresh-all-progress-track"><span style={{ width: `${progressPercent}%` }} /></div>
+      <div className="refresh-all-progress-meta"><span>Còn {formatCount(refreshAllProgress.pending)} MST trong hàng đợi{refreshAllProgress.running ? ` (${formatCount(refreshAllProgress.running)} đang xử lý)` : ""}</span><span>Còn khoảng {formatRefreshEta(refreshAllProgress.etaSeconds)}</span></div>
+    </div> : null}
+    {isLoading ? <div className="settings-loading">Đang tải cấu hình...</div> : <form className="settings-form" onSubmit={saveSettings}><label><span>Endpoint chính</span><input value={primaryEndpoint} onChange={(event) => setPrimaryEndpoint(event.target.value)} placeholder="https://.../{taxCode}" required /></label><label><span>Endpoint dự phòng</span><input value={fallbackEndpoint} onChange={(event) => setFallbackEndpoint(event.target.value)} placeholder="https://.../{taxCode}" required /></label><div className="settings-actions"><button className="export-button" type="submit" disabled={isSaving}>{isSaving ? "Đang lưu..." : "Lưu cấu hình"}</button></div>{settingsError ? <p className="settings-error"><WarningCircle size={16} /> {settingsError}</p> : null}{settingsMessage ? <p className="settings-success"><CheckCircle size={16} /> {settingsMessage}</p> : null}</form>}
+  </section>;
 }
 
 function TableSkeleton() {

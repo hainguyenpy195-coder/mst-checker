@@ -6,11 +6,11 @@ import { invokeTaxpayerBatchRefresh } from "@/lib/xinvoice-worker";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const QUEUE_STATES = ["queued", "running", "retry", "success", "dead_letter"] as const;
+const QUEUE_STATES = ["queued", "running", "retry", "success", "dead_letter", "cancelled"] as const;
 type QueueState = (typeof QUEUE_STATES)[number];
-type RefreshMode = "start" | "continue";
+type RefreshMode = "start" | "continue" | "stop";
 
-type QueueStatus = Record<QueueState, number> & { pending: number };
+type QueueStatus = Record<QueueState, number> & { pending: number; total: number; completed: number };
 
 async function getQueueStatus(supabase: ReturnType<typeof createAdminClient>): Promise<QueueStatus> {
   const results = await Promise.all(QUEUE_STATES.map(async (state) => {
@@ -25,9 +25,13 @@ async function getQueueStatus(supabase: ReturnType<typeof createAdminClient>): P
   if (failedResult?.error) throw failedResult.error;
 
   const counts = Object.fromEntries(results.map((result) => [result.state, result.count])) as Record<QueueState, number>;
+  const total = QUEUE_STATES.reduce((sum, state) => sum + counts[state], 0);
+  const completed = counts.success + counts.dead_letter + counts.cancelled;
   return {
     ...counts,
     pending: counts.queued + counts.running + counts.retry,
+    total,
+    completed,
   };
 }
 
@@ -48,7 +52,7 @@ export async function POST(request: Request) {
   }
 
   const mode = body.mode ?? "start";
-  if (mode !== "start" && mode !== "continue") {
+  if (mode !== "start" && mode !== "continue" && mode !== "stop") {
     return NextResponse.json({ error: "Chế độ cập nhật toàn bộ không hợp lệ." }, { status: 400 });
   }
 
@@ -56,9 +60,33 @@ export async function POST(request: Request) {
   let queue = await getQueueStatus(supabase);
   let enqueued = 0;
 
-  // Only an empty queue is filled. Repeated clicks cannot reset retry/success
-  // states while a manual run is already in progress.
-  if (mode === "start" && queue.pending === 0) {
+  if (mode === "stop") {
+    const { data, error } = await supabase.rpc("cancel_pending_taxpayer_refreshes");
+    if (error) {
+      console.error("manual all-taxpayer cancellation failed", error);
+      return NextResponse.json({ error: "Không thể dừng hàng đợi cập nhật toàn bộ." }, { status: 500 });
+    }
+
+    queue = await getQueueStatus(supabase);
+    return NextResponse.json({
+      ok: true,
+      done: queue.pending === 0,
+      stopped: true,
+      cancelled: Number(data ?? 0),
+      total: queue.total,
+      completed: queue.completed,
+      pending: queue.pending,
+      queue,
+      message: queue.pending === 0
+        ? "Đã dừng cập nhật toàn bộ."
+        : "Đã dừng nhận các MST mới; các MST đang xử lý sẽ hoàn tất lượt hiện tại.",
+    });
+  }
+
+  // A new manual run always requeues the full catalogue. The frontend locks
+  // the button while the run is active, so a normal start refreshes every MST
+  // instead of draining only the leftover retry rows.
+  if (mode === "start") {
     const { data, error } = await supabase.rpc("enqueue_all_taxpayer_refreshes");
     if (error) {
       console.error("manual all-taxpayer enqueue failed", error);
@@ -69,7 +97,17 @@ export async function POST(request: Request) {
   }
 
   if (mode === "continue" && queue.pending === 0) {
-    return NextResponse.json({ ok: true, done: true, enqueued, processed: 0, skipped: 0, pending: 0, queue });
+    return NextResponse.json({
+      ok: true,
+      done: true,
+      enqueued,
+      processed: 0,
+      skipped: 0,
+      total: queue.total,
+      completed: queue.completed,
+      pending: 0,
+      queue,
+    });
   }
 
   try {
@@ -85,6 +123,8 @@ export async function POST(request: Request) {
       enqueued,
       processed,
       skipped,
+      total: queue.total,
+      completed: queue.completed,
       pending: queue.pending,
       queue,
       message: done
@@ -99,6 +139,8 @@ export async function POST(request: Request) {
       done: false,
       enqueued,
       processed: 0,
+      total: queue.total,
+      completed: queue.completed,
       pending: queue.pending,
       queue,
       message: error instanceof Error
