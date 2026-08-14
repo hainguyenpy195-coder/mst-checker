@@ -87,6 +87,8 @@ const DEFAULT_PRIMARY_ENDPOINT = "https://api.xinvoice.vn/gdt-api/tax-payer/{tax
 const DEFAULT_FALLBACK_ENDPOINT = "https://api.vietqr.io/v2/business/{taxCode}";
 const PRIMARY_ENDPOINT_KEY = "primary_tax_lookup_endpoint";
 const FALLBACK_ENDPOINT_KEY = "fallback_tax_lookup_endpoint";
+const STATUS_BATCH_SIZE = 40;
+const STATUS_PRIMARY_BATCH_SIZE = 20;
 
 let secretKey: string | undefined;
 if (secretKeysJson) {
@@ -564,7 +566,7 @@ Deno.serve(async (request) => {
   }
 
   const statusOnly = body.refreshMode === "status" && !requestedTaxCode && !requestedTaxCodes.length;
-  const batchLimit = statusOnly ? 20 : 10;
+  const batchLimit = statusOnly ? STATUS_BATCH_SIZE : 10;
   const { data: jobs, error: claimError } = requestedTaxCode
     ? await supabase.rpc("claim_refresh_job", { p_tax_code: requestedTaxCode })
       : requestedTaxCodes.length
@@ -579,7 +581,7 @@ Deno.serve(async (request) => {
   const processJob = async (job: RefreshJob, index: number) => {
     try {
       const result = statusOnly
-        ? await handleStatusJob(job, endpointSettings, index < 10 ? "xinvoice" : "vietqr")
+        ? await handleStatusJob(job, endpointSettings, index < STATUS_PRIMARY_BATCH_SIZE ? "xinvoice" : "vietqr")
         : await handleJob(job, endpointSettings);
       return {
         tax_code: job.tax_code,

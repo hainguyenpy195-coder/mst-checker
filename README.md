@@ -47,7 +47,7 @@ Mở `http://localhost:3000`.
 5. Thiết lập secret nội bộ cho Edge Function bằng Supabase CLI hoặc Dashboard:
    `REFRESH_WORKER_SECRET`. Endpoint tra cứu MST công khai của XInvoice không
    yêu cầu `client-id` hoặc `api-key`.
-6. Triển khai Edge Function `supabase/functions/xinvoice-refresh`. Migration `202608130008_manual_refresh_only.sql` và `supabase/cron.sql` tắt các cron tự động; người dùng bắt đầu cập nhật bằng nút `Cập nhật toàn bộ` ở tab Tổng hợp hoặc nút cập nhật từng MST. Worker vẫn xử lý theo lô tối đa 10 MST/lượt và retry/backoff để tôn trọng giới hạn endpoint.
+6. Triển khai Edge Function `supabase/functions/xinvoice-refresh`. Migration `202608130008_manual_refresh_only.sql` tắt cron cũ; `202608140017_server_side_refresh_scheduler.sql` khôi phục dispatcher Cron mỗi phút, còn người dùng bắt đầu/tạm dừng cập nhật bằng nút `Cập nhật toàn bộ` ở tab Tổng hợp hoặc tab Cấu hình. Worker cập nhật trạng thái theo lô tối đa 40 MST/lượt (20 MST cho mỗi endpoint), còn các luồng targeted vẫn giới hạn 10 MST/lượt và có retry/backoff.
 
 Supabase Auth không được sử dụng trong phiên bản nội bộ này. Vercel kiểm tra
 tài khoản ứng dụng trong các biến `APP_LOGIN_*` rồi cấp cookie phiên httpOnly.

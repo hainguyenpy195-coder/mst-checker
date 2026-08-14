@@ -68,8 +68,8 @@ minute-level queue drain: the application still starts a full refresh manually,
 while Supabase Cron invokes the worker in the background. The pause flag is
 stored in `app_settings`, so the queue position survives browser close, network
 loss and deploys. The row button and Excel import continue to use targeted
-worker requests. A full status refresh claims up to twenty rows per invocation
-and sends ten through each configured endpoint; targeted worker requests remain
+worker requests. A full status refresh claims up to forty rows per invocation
+and sends twenty through each configured endpoint; targeted worker requests remain
 limited to ten rows. Before a response is applied, the worker compares its
 `updatedAt` with `taxpayers.source_updated_at`; an older or undated endpoint
 snapshot is recorded as checked but cannot overwrite newer DB data. Both modes
