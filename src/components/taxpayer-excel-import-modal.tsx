@@ -14,6 +14,8 @@ import type { TaxpayerExcelCandidate } from "@/lib/taxpayer-excel";
 type ImportPhase = "select" | "preview" | "adding" | "refreshing" | "complete" | "error";
 
 type PreviewResponse = {
+  importId?: string;
+  fileName?: string;
   candidates?: TaxpayerExcelCandidate[];
   counts?: {
     totalRows: number;
@@ -30,6 +32,9 @@ type PreviewResponse = {
 };
 
 type CommitResponse = {
+  nextOffset?: number;
+  totalCandidates?: number;
+  done?: boolean;
   addedTaxCodes?: string[];
   addedCount?: number;
   skippedCount?: number;
@@ -38,6 +43,12 @@ type CommitResponse = {
 
 type RefreshResponse = {
   results?: Array<{ tax_code?: string; ok?: boolean; error?: string }>;
+  error?: string;
+};
+
+type UploadResponse = {
+  importId?: string;
+  signedUrl?: string;
   error?: string;
 };
 
@@ -62,6 +73,7 @@ function formatCount(value: number) {
 export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
+  const [importId, setImportId] = useState<string | null>(null);
   const [phase, setPhase] = useState<ImportPhase>("select");
   const [isReading, setIsReading] = useState(false);
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
@@ -76,6 +88,7 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
 
   function chooseFile(nextFile: File | null) {
     setFile(nextFile);
+    setImportId(null);
     setPreview(null);
     setError(null);
     setRefreshErrors([]);
@@ -88,19 +101,49 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
     setPhase("select");
     setIsReading(true);
     setError(null);
-    const formData = new FormData();
-    formData.append("file", file);
+    let createdImportId: string | null = null;
     try {
+      const uploadResponse = await fetch("/api/taxpayers/import/upload", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ fileName: file.name, fileSize: file.size, contentType: file.type }),
+        cache: "no-store",
+      });
+      const uploadPayload = await uploadResponse.json().catch(() => ({})) as UploadResponse;
+      if (!uploadResponse.ok || !uploadPayload.importId || !uploadPayload.signedUrl) {
+        throw new Error(uploadPayload.error ?? "Không thể chuẩn bị nơi tải file Excel lên.");
+      }
+      createdImportId = uploadPayload.importId;
+      setImportId(createdImportId);
+
+      const uploadBody = new FormData();
+      uploadBody.append("cacheControl", "3600");
+      uploadBody.append("", file);
+      const storageResponse = await fetch(uploadPayload.signedUrl, {
+        method: "PUT",
+        headers: { "x-upsert": "false" },
+        body: uploadBody,
+      });
+      if (!storageResponse.ok) throw new Error("Không thể tải file Excel lên kho lưu trữ.");
+
       const response = await fetch("/api/taxpayers/import/preview", {
         method: "POST",
-        body: formData,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ importId: createdImportId }),
         cache: "no-store",
       });
       const payload = await response.json().catch(() => ({})) as PreviewResponse;
       if (!response.ok) throw new Error(payload.error ?? "Không thể đọc file Excel.");
+      setImportId(payload.importId ?? createdImportId);
       setPreview(payload);
       setPhase("preview");
+      if (!(payload.candidates?.length ?? 0)) {
+        await completeImport(createdImportId, 0, 0, 0);
+      }
     } catch (previewError) {
+      if (createdImportId) {
+        void fetch(`/api/taxpayers/import/upload?importId=${encodeURIComponent(createdImportId)}`, { method: "DELETE", cache: "no-store" });
+      }
       setError(previewError instanceof Error ? previewError.message : "Không thể đọc file Excel.");
     } finally {
       setIsReading(false);
@@ -108,7 +151,7 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
   }
 
   async function startImport() {
-    if (!candidates.length || isBusy) return;
+    if (!candidates.length || !importId || isBusy) return;
 
     setError(null);
     setRefreshErrors([]);
@@ -119,28 +162,26 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
     const addedTaxCodes: string[] = [];
     try {
       for (let index = 0; index < candidates.length; index += COMMIT_BATCH_SIZE) {
-        const batch = candidates.slice(index, index + COMMIT_BATCH_SIZE);
         const response = await fetch("/api/taxpayers/import/commit", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ candidates: batch }),
+          body: JSON.stringify({ importId, offset: index }),
           cache: "no-store",
         });
         const payload = await response.json().catch(() => ({})) as CommitResponse;
         if (!response.ok) throw new Error(payload.error ?? "Không thể thêm MST từ file Excel.");
-        addedTaxCodes.push(...(payload.addedTaxCodes ?? []));
+        for (const taxCode of payload.addedTaxCodes ?? []) {
+          if (!addedTaxCodes.includes(taxCode)) addedTaxCodes.push(taxCode);
+        }
         setProgress((current) => ({
           ...current,
-          current: Math.min(index + batch.length, candidates.length),
+          current: Math.min(payload.nextOffset ?? index + COMMIT_BATCH_SIZE, candidates.length),
           added: addedTaxCodes.length,
         }));
       }
 
       if (!addedTaxCodes.length) {
-        const completedSummary = { addedCount: 0, updatedCount: 0, failedCount: 0 };
-        setSummary(completedSummary);
-        setPhase("complete");
-        onCompleted(completedSummary);
+        await completeImport(importId, 0, 0, 0);
         return;
       }
 
@@ -186,13 +227,43 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
 
       const completedSummary = { addedCount: addedTaxCodes.length, updatedCount, failedCount };
       setRefreshErrors(failures.slice(0, 20));
-      setSummary(completedSummary);
-      setPhase("complete");
-      onCompleted(completedSummary);
+      await completeImport(importId, completedSummary.updatedCount, completedSummary.failedCount, completedSummary.addedCount);
     } catch (importError) {
       setError(importError instanceof Error ? importError.message : "Không thể hoàn tất nhập Excel.");
       setPhase("error");
     }
+  }
+
+  async function completeImport(currentImportId: string, updatedCount: number, failedCount: number, fallbackAddedCount: number) {
+    const response = await fetch("/api/taxpayers/import/complete", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ importId: currentImportId, updatedCount, failedCount }),
+      cache: "no-store",
+    });
+    const payload = await response.json().catch(() => ({})) as {
+      addedCount?: number;
+      updatedCount?: number;
+      failedCount?: number;
+      error?: string;
+    };
+    if (!response.ok) throw new Error(payload.error ?? "Không thể ghi sự kiện nhập Excel vào Lịch sử.");
+
+    const completedSummary = {
+      addedCount: payload.addedCount ?? fallbackAddedCount,
+      updatedCount: payload.updatedCount ?? updatedCount,
+      failedCount: payload.failedCount ?? failedCount,
+    };
+    setSummary(completedSummary);
+    setPhase("complete");
+    onCompleted(completedSummary);
+  }
+
+  function handleClose() {
+    if (importId && phase === "preview") {
+      void fetch(`/api/taxpayers/import/upload?importId=${encodeURIComponent(importId)}`, { method: "DELETE", cache: "no-store" });
+    }
+    onClose();
   }
 
   function renderSelectStep() {
@@ -249,7 +320,7 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
 
   return <div className="confirm-backdrop">
     <section className="confirm-dialog taxpayer-import-dialog" role="dialog" aria-modal="true" aria-labelledby="taxpayer-import-title" aria-describedby="taxpayer-import-description">
-      <div className="taxpayer-import-heading"><div className="confirm-dialog-icon taxpayer-import-icon"><DownloadSimple size={22} weight="duotone" /></div><button className="icon-button" type="button" aria-label="Đóng nhập Excel" disabled={isBusy} onClick={onClose}><X size={17} /></button></div>
+      <div className="taxpayer-import-heading"><div className="confirm-dialog-icon taxpayer-import-icon"><DownloadSimple size={22} weight="duotone" /></div><button className="icon-button" type="button" aria-label="Đóng nhập Excel" disabled={isBusy || isReading} onClick={handleClose}><X size={17} /></button></div>
       <h2 id="taxpayer-import-title">Nhập danh mục MST từ Excel</h2>
       {phase === "select" ? renderSelectStep() : null}
       {phase === "preview" ? renderPreviewStep() : null}
@@ -257,7 +328,7 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
       {phase === "complete" ? renderCompleteStep() : null}
       {phase === "error" ? <div className="taxpayer-import-error"><WarningCircle size={30} weight="duotone" /><strong>{error ?? "Nhập Excel chưa hoàn tất."}</strong><span>Các MST đã thêm vẫn được giữ trong cơ sở dữ liệu và có thể được cập nhật lại sau.</span></div> : null}
       <div className="confirm-actions">
-        {isBusy ? null : <button className="outline-button" type="button" onClick={onClose}>{phase === "complete" || phase === "error" || !file ? "Đóng" : "Hủy"}</button>}
+        {isBusy || isReading ? null : <button className="outline-button" type="button" onClick={handleClose}>{phase === "complete" || phase === "error" || !file ? "Đóng" : "Hủy"}</button>}
         {phase === "select" ? <button className="export-button" type="button" disabled={!file || isReading} onClick={() => void readAndFilterFile()}>{isReading ? "Đang đọc..." : "Đọc và lọc MST"}</button> : null}
         {phase === "preview" && candidates.length ? <button className="export-button" type="button" onClick={() => void startImport()}>Xác nhận thêm {formatCount(candidates.length)} MST</button> : null}
       </div>

@@ -3,12 +3,26 @@ import { authenticateRequest, isAdminSession, READ_ONLY_FORBIDDEN_MESSAGE } from
 import { createAdminClient } from "@/lib/supabase/admin";
 import { readInCodeBatches } from "@/lib/supabase-pagination";
 import { getTaxpayerExcelMaxUploadBytes, parseTaxpayerWorkbook } from "@/lib/taxpayer-excel";
+import {
+  deleteTaxpayerImportFile,
+  getTaxpayerImportSession,
+  isTaxpayerImportId,
+  TAXPAYER_IMPORT_BUCKET,
+  TAXPAYER_IMPORT_STORAGE_MAX_BYTES,
+} from "@/lib/taxpayer-import";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 type TaxpayerCodeRecord = { tax_code: string };
+
+async function markImportFailed(supabase: ReturnType<typeof createAdminClient>, importId: string, message: string) {
+  await supabase.from("taxpayer_excel_imports").update({
+    status: "failed",
+    error: message,
+  }).eq("id", importId);
+}
 
 export async function POST(request: Request) {
   const session = await authenticateRequest(request);
@@ -17,91 +31,118 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: READ_ONLY_FORBIDDEN_MESSAGE }, { status: 403 });
   }
 
-  let formData: FormData;
+  let body: { importId?: unknown };
   try {
-    formData = await request.formData();
+    body = await request.json() as { importId?: unknown };
   } catch {
-    return NextResponse.json({ error: "Không đọc được file Excel tải lên." }, { status: 400 });
+    return NextResponse.json({ error: "Dữ liệu phiên nhập Excel không hợp lệ." }, { status: 400 });
+  }
+  if (!isTaxpayerImportId(body.importId)) {
+    return NextResponse.json({ error: "Không xác định được phiên nhập Excel." }, { status: 400 });
   }
 
-  const fileValue = formData.get("file");
-  if (!(fileValue instanceof File)) {
-    return NextResponse.json({ error: "Vui lòng chọn một file Excel." }, { status: 400 });
+  const supabase = createAdminClient();
+  const { data: importSession, error: sessionError } = await getTaxpayerImportSession(supabase, body.importId, session.username);
+  if (sessionError) {
+    console.error("taxpayer Excel import session lookup failed", sessionError);
+    return NextResponse.json({ error: "Không thể kiểm tra phiên nhập Excel." }, { status: 500 });
   }
-  if (fileValue.size <= 0) {
-    return NextResponse.json({ error: "File Excel đang rỗng." }, { status: 400 });
-  }
-  if (!fileValue.name.toLowerCase().endsWith(".xlsx")) {
-    return NextResponse.json({ error: "Chỉ chấp nhận file Excel định dạng .xlsx." }, { status: 415 });
-  }
-
-  const maxBytes = getTaxpayerExcelMaxUploadBytes();
-  if (fileValue.size > maxBytes) {
-    return NextResponse.json({ error: `File vượt quá giới hạn ${(maxBytes / 1024 / 1024).toFixed(0)} MiB.` }, { status: 413 });
+  if (!importSession) return NextResponse.json({ error: "Không tìm thấy phiên nhập Excel." }, { status: 404 });
+  if (importSession.status !== "uploading") {
+    return NextResponse.json({ error: "Phiên nhập Excel này đã được xử lý hoặc không còn hiệu lực." }, { status: 409 });
   }
 
-  const buffer = Buffer.from(await fileValue.arrayBuffer());
+  const { data: file, error: downloadError } = await supabase.storage
+    .from(TAXPAYER_IMPORT_BUCKET)
+    .download(importSession.storage_path);
+  if (downloadError || !file) {
+    const message = "Không thể đọc file Excel đã tải lên. Vui lòng thử lại.";
+    console.error("taxpayer Excel temporary file download failed", downloadError);
+    await markImportFailed(supabase, importSession.id, message);
+    return NextResponse.json({ error: message }, { status: 422 });
+  }
+
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const maxBytes = Math.min(getTaxpayerExcelMaxUploadBytes(), TAXPAYER_IMPORT_STORAGE_MAX_BYTES);
+  if (buffer.length <= 0) {
+    const message = "File Excel đang rỗng.";
+    await markImportFailed(supabase, importSession.id, message);
+    await deleteTaxpayerImportFile(supabase, importSession.storage_path);
+    return NextResponse.json({ error: message }, { status: 400 });
+  }
   if (buffer.length > maxBytes) {
-    return NextResponse.json({ error: `File vượt quá giới hạn ${(maxBytes / 1024 / 1024).toFixed(0)} MiB.` }, { status: 413 });
+    const message = `File vượt quá giới hạn ${(maxBytes / 1024 / 1024).toFixed(0)} MiB.`;
+    await markImportFailed(supabase, importSession.id, message);
+    await deleteTaxpayerImportFile(supabase, importSession.storage_path);
+    return NextResponse.json({ error: message }, { status: 413 });
   }
 
   let parsed: Awaited<ReturnType<typeof parseTaxpayerWorkbook>>;
   try {
     parsed = await parseTaxpayerWorkbook(buffer);
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Không thể đọc cấu trúc file Excel.";
     console.error("taxpayer Excel parse failed", error);
-    return NextResponse.json({
-      error: error instanceof Error ? error.message : "Không thể đọc cấu trúc file Excel.",
-    }, { status: 422 });
+    await markImportFailed(supabase, importSession.id, message);
+    await deleteTaxpayerImportFile(supabase, importSession.storage_path);
+    return NextResponse.json({ error: message }, { status: 422 });
   }
 
-  if (!parsed.candidates.length) {
-    return NextResponse.json({
-      ok: true,
-      candidates: [],
-      counts: {
-        totalRows: parsed.totalRows,
-        validRows: parsed.validRows,
-        duplicateRows: parsed.duplicateRows,
-        invalidRows: parsed.invalidRowCount,
-        existing: 0,
-        new: 0,
-      },
-      invalidRows: parsed.invalidRows,
-      ignoredSheets: parsed.ignoredSheets,
-      message: "Không tìm thấy MST hợp lệ chưa có trong cơ sở dữ liệu.",
-    });
-  }
-
-  const supabase = createAdminClient();
   const taxCodes = parsed.candidates.map((candidate) => candidate.taxCode);
-  const existingResult = await readInCodeBatches(taxCodes, (batch) => supabase
-    .from("taxpayers")
-    .select("tax_code")
-    .in("tax_code", batch));
+  const existingResult = taxCodes.length
+    ? await readInCodeBatches(taxCodes, (batch) => supabase
+      .from("taxpayers")
+      .select("tax_code")
+      .in("tax_code", batch))
+    : { data: [], error: null };
   if (existingResult.error) {
+    const message = "Không thể kiểm tra MST đã có trong cơ sở dữ liệu.";
     console.error("taxpayer Excel existing-code lookup failed", existingResult.error);
-    return NextResponse.json({ error: "Không thể kiểm tra MST đã có trong cơ sở dữ liệu." }, { status: 500 });
+    await markImportFailed(supabase, importSession.id, message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 
   const existingTaxCodes = new Set((existingResult.data as TaxpayerCodeRecord[]).map((row) => row.tax_code));
   const candidates = parsed.candidates.filter((candidate) => !existingTaxCodes.has(candidate.taxCode));
+  const counts = {
+    totalRows: parsed.totalRows,
+    validRows: parsed.validRows,
+    duplicateRows: parsed.duplicateRows,
+    invalidRows: parsed.invalidRowCount,
+    existing: existingTaxCodes.size,
+    new: candidates.length,
+  };
+  const sourceYears = [...new Set(candidates.flatMap((candidate) => candidate.sources.map((source) => source.sourceYear)))].sort();
+
+  const { error: previewError } = await supabase.from("taxpayer_excel_imports").update({
+    status: "previewed",
+    candidates,
+    preview_stats: counts,
+    source_years: sourceYears,
+    previewed_at: new Date().toISOString(),
+    error: null,
+  }).eq("id", importSession.id).eq("status", "uploading");
+  if (previewError) {
+    console.error("taxpayer Excel preview session save failed", previewError);
+    await markImportFailed(supabase, importSession.id, "Không thể lưu kết quả đọc file Excel.");
+    return NextResponse.json({ error: "Không thể lưu kết quả đọc file Excel." }, { status: 500 });
+  }
+
+  const fileDeleted = await deleteTaxpayerImportFile(supabase, importSession.storage_path);
+  if (fileDeleted) {
+    await supabase.from("taxpayer_excel_imports").update({ file_deleted_at: new Date().toISOString() }).eq("id", importSession.id);
+  }
 
   return NextResponse.json({
     ok: true,
+    importId: importSession.id,
+    fileName: importSession.file_name,
     candidates,
-    counts: {
-      totalRows: parsed.totalRows,
-      validRows: parsed.validRows,
-      duplicateRows: parsed.duplicateRows,
-      invalidRows: parsed.invalidRowCount,
-      existing: existingTaxCodes.size,
-      new: candidates.length,
-    },
+    counts,
     invalidRows: parsed.invalidRows,
     ignoredSheets: parsed.ignoredSheets,
     message: candidates.length
       ? `Phát hiện ${candidates.length.toLocaleString("vi-VN")} MST chưa có trong cơ sở dữ liệu.`
       : "Không tìm thấy MST mới chưa có trong cơ sở dữ liệu.",
-  });
+  }, { headers: { "cache-control": "no-store" } });
 }

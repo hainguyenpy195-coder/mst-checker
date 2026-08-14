@@ -77,7 +77,10 @@ ignored. It filters against
 the aggregate `taxpayers` table, creates one taxpayer row per new MST, keeps
 each worksheet year in `taxpayer_sources`, and then refreshes only those new
 MST codes through the worker. Existing MSTs and invalid rows are reported and
-skipped.
+skipped. Large workbooks are uploaded directly to the private
+`taxpayer-imports` Storage bucket; the Vercel API receives only the import
+session ID. A completed workbook import is also recorded as an
+`excel_imported` event in `taxpayer_activity_logs`.
 
 Hosted Edge Functions provide `SUPABASE_SECRET_KEYS` as a JSON dictionary and
 the worker reads its `default` entry. It also accepts the singular

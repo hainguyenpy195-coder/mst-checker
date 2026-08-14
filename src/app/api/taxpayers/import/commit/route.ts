@@ -4,12 +4,17 @@ import { isValidTaxCode, normalizeTaxCode } from "@/lib/tax-code";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { readInCodeBatches } from "@/lib/supabase-pagination";
 import type { TaxpayerExcelCandidate, TaxpayerExcelSource } from "@/lib/taxpayer-excel";
+import {
+  getTaxpayerImportSession,
+  isTaxpayerImportId,
+  readStoredCandidates,
+} from "@/lib/taxpayer-import";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const MAX_CANDIDATES_PER_COMMIT = 200;
+const MAX_COMMIT_BATCH_SIZE = 100;
 const YEAR_PATTERN = /^\d{4}$/;
 
 type TaxpayerCodeRecord = { tax_code: string };
@@ -25,8 +30,8 @@ function parseCandidates(value: unknown): { candidates?: TaxpayerExcelCandidate[
   if (!Array.isArray(value) || value.length === 0) {
     return { error: "Không có MST mới để thêm." };
   }
-  if (value.length > MAX_CANDIDATES_PER_COMMIT) {
-    return { error: `Mỗi lượt chỉ được thêm tối đa ${MAX_CANDIDATES_PER_COMMIT} MST.` };
+  if (value.length > MAX_COMMIT_BATCH_SIZE) {
+    return { error: `Mỗi lượt chỉ được thêm tối đa ${MAX_COMMIT_BATCH_SIZE} MST.` };
   }
 
   const grouped = new Map<string, TaxpayerExcelCandidate>();
@@ -39,11 +44,7 @@ function parseCandidates(value: unknown): { candidates?: TaxpayerExcelCandidate[
       return { error: `MST ${taxCode} không có thông tin sheet nguồn.` };
     }
 
-    const candidate = grouped.get(taxCode) ?? {
-      taxCode,
-      sources: [],
-    };
-
+    const candidate = grouped.get(taxCode) ?? { taxCode, sources: [] };
     for (const sourceValue of record.sources) {
       if (!sourceValue || typeof sourceValue !== "object") return { error: `Nguồn dữ liệu của MST ${taxCode} không hợp lệ.` };
       const sourceRecord = sourceValue as Record<string, unknown>;
@@ -54,15 +55,10 @@ function parseCandidates(value: unknown): { candidates?: TaxpayerExcelCandidate[
         return { error: `Nguồn dữ liệu của MST ${taxCode} có năm hoặc dòng Excel không hợp lệ.` };
       }
 
-      const source: TaxpayerExcelSource = {
-        sourceSheet,
-        sourceYear,
-        sourceRow,
-      };
+      const source: TaxpayerExcelSource = { sourceSheet, sourceYear, sourceRow };
       const isDuplicateSource = candidate.sources.some((current) => current.sourceSheet === source.sourceSheet && current.sourceRow === source.sourceRow);
       if (!isDuplicateSource) candidate.sources.push(source);
     }
-
     grouped.set(taxCode, candidate);
   }
 
@@ -76,17 +72,54 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: READ_ONLY_FORBIDDEN_MESSAGE }, { status: 403 });
   }
 
-  let body: { candidates?: unknown };
+  let body: { importId?: unknown; offset?: unknown };
   try {
-    body = await request.json() as { candidates?: unknown };
+    body = await request.json() as { importId?: unknown; offset?: unknown };
   } catch {
     return NextResponse.json({ error: "Dữ liệu xác nhận nhập Excel không hợp lệ." }, { status: 400 });
   }
-
-  const parsed = parseCandidates(body.candidates);
-  if (!parsed.candidates) return NextResponse.json({ error: parsed.error }, { status: 400 });
+  if (!isTaxpayerImportId(body.importId)) {
+    return NextResponse.json({ error: "Không xác định được phiên nhập Excel." }, { status: 400 });
+  }
+  const offset = typeof body.offset === "number" ? body.offset : Number(body.offset);
+  if (!Number.isSafeInteger(offset) || offset < 0) {
+    return NextResponse.json({ error: "Vị trí lô MST nhập vào không hợp lệ." }, { status: 400 });
+  }
 
   const supabase = createAdminClient();
+  const { data: importSession, error: sessionError } = await getTaxpayerImportSession(supabase, body.importId, session.username);
+  if (sessionError) {
+    console.error("taxpayer Excel commit session lookup failed", sessionError);
+    return NextResponse.json({ error: "Không thể kiểm tra phiên nhập Excel." }, { status: 500 });
+  }
+  if (!importSession) return NextResponse.json({ error: "Không tìm thấy phiên nhập Excel." }, { status: 404 });
+  if (!["previewed", "committing"].includes(importSession.status)) {
+    return NextResponse.json({ error: "Phiên nhập Excel này không còn ở trạng thái chờ xác nhận." }, { status: 409 });
+  }
+
+  const candidates = readStoredCandidates(importSession.candidates);
+  if (offset !== importSession.commit_offset) {
+    return NextResponse.json({
+      error: "Lô MST này không còn là lô kế tiếp cần xử lý.",
+      nextOffset: importSession.commit_offset,
+    }, { status: 409 });
+  }
+  if (offset >= candidates.length) {
+    return NextResponse.json({
+      ok: true,
+      done: true,
+      nextOffset: offset,
+      totalCandidates: candidates.length,
+      addedTaxCodes: [],
+      addedCount: importSession.added_count,
+      skippedCount: 0,
+      sourceCount: 0,
+    });
+  }
+
+  const parsed = parseCandidates(candidates.slice(offset, offset + MAX_COMMIT_BATCH_SIZE));
+  if (!parsed.candidates) return NextResponse.json({ error: parsed.error }, { status: 400 });
+
   const taxCodes = parsed.candidates.map((candidate) => candidate.taxCode);
   const existingResult = await readInCodeBatches(taxCodes, (batch) => supabase
     .from("taxpayers")
@@ -98,40 +131,60 @@ export async function POST(request: Request) {
   }
 
   const existingTaxCodes = new Set((existingResult.data as TaxpayerCodeRecord[]).map((row) => row.tax_code));
-  const candidates = parsed.candidates.filter((candidate) => !existingTaxCodes.has(candidate.taxCode));
-  if (!candidates.length) {
-    return NextResponse.json({ ok: true, addedTaxCodes: [], addedCount: 0, skippedCount: parsed.candidates.length, sourceCount: 0 });
+  const newCandidates = parsed.candidates.filter((candidate) => !existingTaxCodes.has(candidate.taxCode));
+  let addedTaxCodes: string[] = [];
+  let sourceCount = 0;
+  if (newCandidates.length) {
+    const rows = newCandidates.map((candidate) => ({
+      tax_code: candidate.taxCode,
+      sources: candidate.sources.map((source) => ({
+        source_sheet: source.sourceSheet,
+        source_year: source.sourceYear,
+        source_row: source.sourceRow,
+      })),
+    }));
+    const { data, error } = await supabase.rpc("import_taxpayer_batch", {
+      p_rows: rows,
+      p_actor_username: session.username,
+    });
+    if (error) {
+      console.error("taxpayer Excel batch insert failed", error);
+      return NextResponse.json({ error: "Không thể thêm MST hàng loạt. Hãy kiểm tra migration nhập Excel trên Supabase." }, { status: 500 });
+    }
+
+    addedTaxCodes = (Array.isArray(data) ? data : [])
+      .map((row) => (row && typeof row === "object" ? (row as { tax_code?: unknown }).tax_code : null))
+      .filter((taxCode): taxCode is string => typeof taxCode === "string");
+    const addedSet = new Set(addedTaxCodes);
+    sourceCount = newCandidates
+      .filter((candidate) => addedSet.has(candidate.taxCode))
+      .reduce((count, candidate) => count + candidate.sources.length, 0);
   }
 
-  const rows = candidates.map((candidate) => ({
-    tax_code: candidate.taxCode,
-    sources: candidate.sources.map((source) => ({
-      source_sheet: source.sourceSheet,
-      source_year: source.sourceYear,
-      source_row: source.sourceRow,
-    })),
-  }));
-  const { data, error } = await supabase.rpc("import_taxpayer_batch", {
-    p_rows: rows,
-    p_actor_username: session.username,
-  });
-  if (error) {
-    console.error("taxpayer Excel batch insert failed", error);
-    return NextResponse.json({ error: "Không thể thêm MST hàng loạt. Hãy kiểm tra migration nhập Excel trên Supabase." }, { status: 500 });
+  const storedAddedTaxCodes = Array.isArray(importSession.added_tax_codes)
+    ? importSession.added_tax_codes.filter((taxCode): taxCode is string => typeof taxCode === "string")
+    : [];
+  const allAddedTaxCodes = [...new Set([...storedAddedTaxCodes, ...addedTaxCodes])];
+  const nextOffset = offset + parsed.candidates.length;
+  const { error: updateError } = await supabase.from("taxpayer_excel_imports").update({
+    status: "committing",
+    commit_offset: nextOffset,
+    added_tax_codes: allAddedTaxCodes,
+    added_count: allAddedTaxCodes.length,
+    error: null,
+  }).eq("id", importSession.id).eq("commit_offset", offset);
+  if (updateError) {
+    console.error("taxpayer Excel commit session update failed", updateError);
+    return NextResponse.json({ error: "Không thể cập nhật tiến trình nhập Excel." }, { status: 500 });
   }
-
-  const addedTaxCodes = (Array.isArray(data) ? data : [])
-    .map((row) => (row && typeof row === "object" ? (row as { tax_code?: unknown }).tax_code : null))
-    .filter((taxCode): taxCode is string => typeof taxCode === "string");
-  const addedSet = new Set(addedTaxCodes);
-  const sourceCount = candidates
-    .filter((candidate) => addedSet.has(candidate.taxCode))
-    .reduce((count, candidate) => count + candidate.sources.length, 0);
 
   return NextResponse.json({
     ok: true,
+    done: nextOffset >= candidates.length,
+    nextOffset,
+    totalCandidates: candidates.length,
     addedTaxCodes,
-    addedCount: addedTaxCodes.length,
+    addedCount: allAddedTaxCodes.length,
     skippedCount: parsed.candidates.length - addedTaxCodes.length,
     sourceCount,
   }, { status: 201 });

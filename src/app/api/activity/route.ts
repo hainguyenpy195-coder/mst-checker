@@ -17,7 +17,7 @@ export async function GET(request: Request) {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("taxpayer_activity_logs")
-    .select("id, action, tax_code, taxpayer_name, source_year, actor_username, created_at")
+    .select("id, action, import_id, tax_code, taxpayer_name, source_year, actor_username, details, created_at")
     .order("created_at", { ascending: false })
     .limit(limit);
 

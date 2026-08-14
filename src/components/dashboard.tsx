@@ -78,11 +78,13 @@ type ManualLookupState = {
 };
 type ActivityRow = {
   id: number;
-  action: "taxpayer_added" | "taxpayer_deleted";
-  tax_code: string;
+  action: "taxpayer_added" | "taxpayer_deleted" | "excel_imported";
+  import_id: string | null;
+  tax_code: string | null;
   taxpayer_name: string | null;
   source_year: string | null;
   actor_username: string;
+  details: Record<string, unknown> | null;
   created_at: string;
 };
 type TaxCodeLookupState = "idle" | "checking" | "ready" | "duplicate" | "unavailable" | "invalid";
@@ -163,7 +165,40 @@ function matchesTaxpayerQuery(row: TaxpayerRow, needle: string) {
 }
 
 function activityLabel(action: ActivityRow["action"]) {
-  return action === "taxpayer_added" ? "Đã thêm" : "Đã xóa";
+  if (action === "taxpayer_added") return "Đã thêm";
+  if (action === "taxpayer_deleted") return "Đã xóa";
+  return "Nhập Excel";
+}
+
+function activityActionClass(action: ActivityRow["action"]) {
+  if (action === "taxpayer_added") return "added";
+  if (action === "taxpayer_deleted") return "deleted";
+  return "imported";
+}
+
+function activitySubject(row: ActivityRow) {
+  if (row.action === "excel_imported") {
+    const fileName = row.details?.file_name;
+    return typeof fileName === "string" && fileName ? fileName : row.taxpayer_name ?? "File Excel";
+  }
+  return row.taxpayer_name ?? "Chưa có tên";
+}
+
+function activitySourceYear(row: ActivityRow) {
+  if (row.source_year) return row.source_year;
+  const sourceYears = row.details?.source_years;
+  return Array.isArray(sourceYears) ? sourceYears.filter((year): year is string => typeof year === "string").join(", ") || "—" : "—";
+}
+
+function activityImportSummary(row: ActivityRow) {
+  if (row.action !== "excel_imported") return null;
+  const addedCount = row.details?.added_count;
+  const updatedCount = row.details?.updated_count;
+  const failedCount = row.details?.failed_count;
+  if (typeof addedCount !== "number" || typeof updatedCount !== "number" || typeof failedCount !== "number") return null;
+  return failedCount
+    ? `Thêm ${addedCount.toLocaleString("vi-VN")} MST · cập nhật ${updatedCount.toLocaleString("vi-VN")} · lỗi ${failedCount.toLocaleString("vi-VN")}`
+    : `Thêm và cập nhật ${addedCount.toLocaleString("vi-VN")} MST`;
 }
 
 export default function Dashboard({ username, role }: DashboardProps) {
@@ -1092,22 +1127,23 @@ function MobileTaxpayerCard({ row, canWrite, isExpanded, isUpdating, disableRefr
 
 function ActivityPanel({ rows, isLoading, error }: { rows: ActivityRow[]; isLoading: boolean; error: string | null }) {
   return <section className="activity-section">
-    <div className="activity-toolbar"><div><h2>Nhật ký danh mục</h2><span>100 thao tác thêm hoặc xóa MST gần nhất.</span></div></div>
+    <div className="activity-toolbar"><div><h2>Nhật ký danh mục</h2><span>100 thao tác thêm, xóa MST hoặc nhập Excel gần nhất.</span></div></div>
     {error ? <div className="table-alert"><WarningCircle size={18} /> {error}</div> : null}
     <div className="table-scroll">
       <table className="activity-table">
         <thead><tr><th>Thời điểm</th><th>Thao tác</th><th>Mã số thuế</th><th>Tên người nộp thuế</th><th>Năm theo dõi</th><th>Người thực hiện</th></tr></thead>
         <tbody>
-          {isLoading ? <ActivitySkeleton /> : rows.length === 0 ? <tr><td colSpan={6}><div className="table-empty"><ClockCounterClockwise size={26} /><strong>Chưa có thao tác nào được ghi nhận</strong><span>Các lần thêm hoặc xóa MST sẽ xuất hiện tại đây.</span></div></td></tr> : rows.map((row) => <tr key={row.id}><td className="date-cell">{formatDate(row.created_at)}</td><td><span className={`activity-action activity-action-${row.action === "taxpayer_added" ? "added" : "deleted"}`}>{activityLabel(row.action)}</span></td><td className="tax-code-cell">{row.tax_code}</td><td>{row.taxpayer_name ?? "Chưa có tên"}</td><td><span className="sheet-label">{row.source_year ?? "—"}</span></td><td>{row.actor_username}</td></tr>)}
+          {isLoading ? <ActivitySkeleton /> : rows.length === 0 ? <tr><td colSpan={6}><div className="table-empty"><ClockCounterClockwise size={26} /><strong>Chưa có thao tác nào được ghi nhận</strong><span>Các lần thêm, xóa MST hoặc nhập Excel sẽ xuất hiện tại đây.</span></div></td></tr> : rows.map((row) => <tr key={row.id}><td className="date-cell">{formatDate(row.created_at)}</td><td><span className={`activity-action activity-action-${activityActionClass(row.action)}`}>{activityLabel(row.action)}</span></td><td className="tax-code-cell">{row.tax_code ?? "—"}</td><td><strong>{activitySubject(row)}</strong>{activityImportSummary(row) ? <small className="activity-event-detail">{activityImportSummary(row)}</small> : null}</td><td><span className="sheet-label">{activitySourceYear(row)}</span></td><td>{row.actor_username}</td></tr>)}
         </tbody>
       </table>
     </div>
     <div className="mobile-activity-list" aria-live="polite">
-      {isLoading ? <>{[1, 2, 3].map((item) => <div className="mobile-activity-skeleton" key={item}><span /><span /><span /></div>)}</> : rows.length === 0 ? <div className="mobile-empty-state"><ClockCounterClockwise size={25} weight="duotone" /><strong>Chưa có thao tác nào được ghi nhận</strong><span>Các lần thêm hoặc xóa MST sẽ xuất hiện tại đây.</span></div> : rows.map((row) => <article className="mobile-activity-card" key={row.id}>
-        <div className="mobile-activity-card-topline"><span className={`activity-action activity-action-${row.action === "taxpayer_added" ? "added" : "deleted"}`}>{activityLabel(row.action)}</span><time>{formatDate(row.created_at)}</time></div>
-        <strong className="mobile-tax-code">{row.tax_code}</strong>
-        <span>{row.taxpayer_name ?? "Chưa có tên"}</span>
-        <small>Năm {row.source_year ?? "chưa rõ"} · {row.actor_username}</small>
+      {isLoading ? <>{[1, 2, 3].map((item) => <div className="mobile-activity-skeleton" key={item}><span /><span /><span /></div>)}</> : rows.length === 0 ? <div className="mobile-empty-state"><ClockCounterClockwise size={25} weight="duotone" /><strong>Chưa có thao tác nào được ghi nhận</strong><span>Các lần thêm, xóa MST hoặc nhập Excel sẽ xuất hiện tại đây.</span></div> : rows.map((row) => <article className="mobile-activity-card" key={row.id}>
+        <div className="mobile-activity-card-topline"><span className={`activity-action activity-action-${activityActionClass(row.action)}`}>{activityLabel(row.action)}</span><time>{formatDate(row.created_at)}</time></div>
+        <strong className="mobile-tax-code">{row.tax_code ?? "—"}</strong>
+        <span>{activitySubject(row)}</span>
+        {activityImportSummary(row) ? <small>{activityImportSummary(row)}</small> : null}
+        <small>Năm {activitySourceYear(row) === "—" ? "chưa rõ" : activitySourceYear(row)} · {row.actor_username}</small>
       </article>)}</div>
   </section>;
 }

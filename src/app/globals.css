@@ -262,6 +262,8 @@ button:not(:disabled):active { transform: translateY(1px); }
 .activity-action { display: inline-flex; align-items: center; min-height: 24px; font-size: 12px; font-weight: 620; }
 .activity-action-added { color: var(--success); }
 .activity-action-deleted { color: var(--danger); }
+.activity-action-imported { color: var(--accent-dark); }
+.activity-event-detail { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; font-weight: 500; }
 
 .confirm-backdrop { position: fixed; z-index: 50; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(18, 35, 62, 0.5); }
 .confirm-dialog { width: min(100%, 490px); padding: 27px; background: var(--surface); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 24px 60px rgba(23, 44, 76, 0.34); }
