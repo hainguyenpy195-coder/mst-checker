@@ -4,6 +4,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { isValidTaxCode, normalizeTaxCode, TAX_CODE_FORMAT_MESSAGE } from "@/lib/tax-code";
 import { invokeTaxpayerRefresh } from "@/lib/xinvoice-worker";
 import { readAllPages, readInCodeBatches } from "@/lib/supabase-pagination";
+import type { TaxpayerEvidence } from "@/lib/types";
+import { TAXPAYER_EVIDENCE_BUCKET } from "@/lib/taxpayer-evidence";
 
 const YEAR_PATTERN = /^\d{4}$/;
 
@@ -29,6 +31,10 @@ type TaxpayerSourceUnitRecord = {
   source_unit_label: string;
   source_unit_marker: string | null;
   source_unit_order: number;
+};
+
+type TaxpayerEvidenceRecord = TaxpayerEvidence & {
+  tax_code: string;
 };
 
 function normalizeYear(value: string) {
@@ -119,22 +125,39 @@ export async function GET(request: Request) {
   const sourceRows = sourceResult.data ?? [];
   const sourceUnits = (sourceUnitResult.data as TaxpayerSourceUnitRecord[] | null) ?? [];
   const taxCodes = [...new Set(sourceRows.map((source) => normalizeTaxCode(source.tax_code)))];
-  const taxpayerResult = taxCodes.length
-    ? await readInCodeBatches(taxCodes, (batch) => supabase
+  const taxpayerResultPromise = taxCodes.length
+    ? readInCodeBatches(taxCodes, (batch) => supabase
         .from("taxpayers")
         .select("tax_code, name, org_type, address, tax_department, status, status_group, source_updated_at, previous_checked_at, last_checked_at, status_changed_at, last_error, next_check_at")
         .in("tax_code", batch))
     : { data: [], error: null };
+  const evidenceResultPromise = taxCodes.length
+    ? readInCodeBatches(taxCodes, (batch) => supabase
+        .from("taxpayer_evidence")
+        .select("tax_code, file_name, content_type, file_size, updated_at")
+        .in("tax_code", batch))
+    : { data: [], error: null };
+  const [taxpayerResult, evidenceResult] = await Promise.all([taxpayerResultPromise, evidenceResultPromise]);
   const { data: taxpayers, error: taxpayersError } = taxpayerResult;
 
-  if (taxpayersError) {
-    console.error("taxpayer detail query failed", taxpayersError);
+  if (taxpayersError || evidenceResult.error) {
+    console.error("taxpayer detail query failed", taxpayersError ?? evidenceResult.error);
     return NextResponse.json({ error: "Không thể tải chi tiết MST." }, { status: 500 });
   }
 
   const taxpayerRecords = (taxpayers as TaxpayerRecord[] | null) ?? [];
   const byTaxCode = new Map(taxpayerRecords.map((taxpayer) => [taxpayer.tax_code, taxpayer]));
-  const rows = sourceRows.map((source) => ({ ...source, taxpayer: byTaxCode.get(source.tax_code) ?? null }));
+  const evidenceRecords = (evidenceResult.data as TaxpayerEvidenceRecord[] | null) ?? [];
+  const evidenceByTaxCode = new Map(evidenceRecords.map((evidence) => [evidence.tax_code, evidence]));
+  const rows = sourceRows.map((source) => {
+    const taxpayer = byTaxCode.get(source.tax_code);
+    return {
+      ...source,
+      taxpayer: taxpayer
+        ? { ...taxpayer, evidence: evidenceByTaxCode.get(source.tax_code) ?? null }
+        : null,
+    };
+  });
 
   return NextResponse.json({
     rows,
@@ -251,7 +274,7 @@ export async function DELETE(request: Request) {
   }
 
   const supabase = createAdminClient();
-  const [existingResult, sourceResult] = await Promise.all([
+  const [existingResult, sourceResult, evidenceResult] = await Promise.all([
     supabase
       .from("taxpayers")
       .select("tax_code, name")
@@ -261,9 +284,13 @@ export async function DELETE(request: Request) {
       .from("taxpayer_sources")
       .select("source_year")
       .eq("tax_code", taxCode),
+    supabase
+      .from("taxpayer_evidence")
+      .select("storage_path")
+      .eq("tax_code", taxCode),
   ]);
-  if (existingResult.error || sourceResult.error) {
-    console.error("taxpayer delete lookup failed", existingResult.error ?? sourceResult.error);
+  if (existingResult.error || sourceResult.error || evidenceResult.error) {
+    console.error("taxpayer delete lookup failed", existingResult.error ?? sourceResult.error ?? evidenceResult.error);
     return NextResponse.json({ error: "Không thể kiểm tra MST cần xóa." }, { status: 500 });
   }
   const existing = existingResult.data;
@@ -291,10 +318,23 @@ export async function DELETE(request: Request) {
   });
   if (activityError) console.error("taxpayer delete activity log failed", activityError);
 
+  const evidenceStoragePath = evidenceResult.data?.[0]?.storage_path;
+  let evidenceWarning: string | undefined;
+  if (evidenceStoragePath) {
+    const { error: evidenceStorageError } = await supabase.storage
+      .from(TAXPAYER_EVIDENCE_BUCKET)
+      .remove([evidenceStoragePath]);
+    if (evidenceStorageError) {
+      console.error("taxpayer evidence cleanup after taxpayer deletion failed", evidenceStorageError);
+      evidenceWarning = "MST đã được xóa nhưng file bằng chứng chưa được dọn khỏi Storage.";
+    }
+  }
+
   return NextResponse.json({
     ok: true,
     taxCode,
     message: `Đã xóa MST ${taxCode} khỏi danh mục.`,
     activityWarning: activityError ? "MST đã được xóa nhưng chưa ghi được lịch sử thao tác." : undefined,
+    evidenceWarning,
   });
 }

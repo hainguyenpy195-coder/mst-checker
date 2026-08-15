@@ -135,6 +135,16 @@ in the database is skipped. A valid seller MST that does not exist in the
 not create or refresh taxpayer records automatically. The Mua vào table filters
 by inclusive invoice issue-date range and displays dates as `dd/MM/yyyy`.
 
+## Taxpayer evidence screenshots
+
+Migration `202608150002_taxpayer_evidence.sql` creates the private
+`taxpayer-evidence` Storage bucket and the `taxpayer_evidence` metadata table.
+It stores one current PNG/JPG/WEBP screenshot per MST, up to 4 MiB. The
+Next.js server route mediates signed viewing URLs and restricts upload,
+replacement, and deletion to the administrator account; readonly accounts can
+only view an existing screenshot. The migration has been applied to the linked
+Supabase project; no taxpayer seed data is required for this feature.
+
 Hosted Edge Functions provide `SUPABASE_SECRET_KEYS` as a JSON dictionary and
 the worker reads its `default` entry. It also accepts the singular
 `SUPABASE_SECRET_KEY` for local/server runtimes and the legacy

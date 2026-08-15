@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, FormEvent, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowsClockwise,
@@ -8,10 +8,13 @@ import {
   CheckCircle,
   ClockCounterClockwise,
   DownloadSimple,
+  Eye,
   FileText,
   Gear,
+  ImageSquare,
   MagnifyingGlass,
   Pause,
+  PencilSimple,
   Play,
   Plus,
   Receipt,
@@ -20,6 +23,7 @@ import {
   SquaresFour,
   Table,
   Trash,
+  UploadSimple,
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
@@ -27,6 +31,7 @@ import { getDashboardHref, getDashboardViewFromPathname, type DashboardView } fr
 import { isValidTaxCode, normalizeTaxCode, TAX_CODE_FORMAT_HINT, TAX_CODE_INPUT_PATTERN } from "@/lib/tax-code";
 import { formatTaxpayerUnitHeading, getTaxpayerUnitDisplayName, getTaxpayerUnitOrder } from "@/lib/taxpayer-units";
 import type { AppRole } from "@/lib/app-auth";
+import type { TaxpayerEvidence as TaxpayerEvidenceRecord } from "@/lib/types";
 import InvoicePanel from "@/components/invoice-panel";
 import PurchaseInvoicePanel from "@/components/purchase-invoice-panel";
 import TaxpayerExcelImportModal from "@/components/taxpayer-excel-import-modal";
@@ -57,6 +62,7 @@ type TaxpayerDetail = {
   last_checked_at: string | null;
   status_changed_at: string | null;
   last_error: string | null;
+  evidence?: TaxpayerEvidenceRecord | null;
 };
 
 type TaxpayerRow = {
@@ -494,7 +500,15 @@ export default function Dashboard({ username, role }: DashboardProps) {
 
   function patchTaxpayerDetail(taxCode: string, taxpayer: TaxpayerDetail | null | undefined) {
     if (!taxpayer) return;
-    setRows((currentRows) => currentRows.map((row) => row.tax_code === taxCode ? { ...row, taxpayer } : row));
+    setRows((currentRows) => currentRows.map((row) => row.tax_code === taxCode
+      ? { ...row, taxpayer: { ...taxpayer, evidence: taxpayer.evidence ?? row.taxpayer?.evidence ?? null } }
+      : row));
+  }
+
+  function patchTaxpayerEvidence(taxCode: string, evidence: TaxpayerEvidenceRecord | null) {
+    setRows((currentRows) => currentRows.map((row) => row.tax_code === taxCode && row.taxpayer
+      ? { ...row, taxpayer: { ...row.taxpayer, evidence } }
+      : row));
   }
 
   async function loadActivity() {
@@ -752,7 +766,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
           <button className="row-delete-button" type="button" title={`Xóa toàn bộ MST ${row.tax_code}`} aria-label={`Xóa toàn bộ MST ${row.tax_code}`} disabled={isDeleting || isRefreshingAll || Boolean(manualLookup)} onClick={(event) => { event.stopPropagation(); openDeleteDialog(row); }}><Trash size={13} /></button>
         </div> : null}</td>
       </tr>
-      {isExpanded ? <tr key={`${row.id}-detail`} className="detail-row"><td colSpan={8}><DetailPanel row={row} /></td></tr> : null}
+      {isExpanded ? <tr key={`${row.id}-detail`} className="detail-row"><td colSpan={8}><DetailPanel row={row} canWrite={canWrite} onEvidenceChange={(evidence) => patchTaxpayerEvidence(row.tax_code, evidence)} /></td></tr> : null}
     </Fragment>;
   }
 
@@ -1249,6 +1263,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
             onToggleRow={(rowId) => setExpandedRow((current) => current === rowId ? null : rowId)}
             onRefresh={(row) => void refreshTaxpayer(row)}
             onDelete={openDeleteDialog}
+            onEvidenceChange={patchTaxpayerEvidence}
           />
           <section className="table-section desktop-data-table">
             <div className="table-toolbar">
@@ -1269,7 +1284,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
             {error ? <div className="table-alert"><WarningCircle size={18} /> {error}</div> : null}
             <div className="table-scroll">
               <table className="data-table">
-                <thead><tr><th className="col-expand" /><th>Mã số thuế</th><th>Tên người nộp thuế</th><th>Năm</th><th>Tình trạng</th><th title="Lần hệ thống tra cứu endpoint gần nhất">Tra cứu lúc</th><th>Nguồn dữ liệu</th><th className="actions-header">Thao tác</th></tr></thead>
+                <thead><tr><th className="col-expand" /><th>Mã số thuế</th><th>Tên người nộp thuế</th><th>Năm</th><th>Tình trạng</th><th title="Lần hệ thống tra cứu endpoint gần nhất">Lần tra cứu mới nhất</th><th>Nguồn dữ liệu</th><th className="actions-header">Thao tác</th></tr></thead>
                 <tbody>
                   {isLoading ? <TableSkeleton /> : filteredRows.length === 0 && !showEmptyUnitGroups ? <tr><td colSpan={8}><div className="table-empty"><FileText size={26} /><strong>Chưa có dữ liệu để hiển thị</strong><span>Dữ liệu sẽ xuất hiện sau khi migration và seed Supabase hoàn tất.</span></div></td></tr> : viewMode === "sheets" ? pagedUnitSections.map((section) => <Fragment key={`unit-${section.key}`}>
                     <tr className="unit-group-row"><td colSpan={8}><strong>{section.label}</strong></td></tr>
@@ -1336,6 +1351,7 @@ type MobileLookupPanelProps = {
   onToggleRow: (rowId: number) => void;
   onRefresh: (row: TaxpayerRow) => void;
   onDelete: (row: TaxpayerRow) => void;
+  onEvidenceChange: (taxCode: string, evidence: TaxpayerEvidenceRecord | null) => void;
 };
 
 function MobileLookupPanel({
@@ -1358,6 +1374,7 @@ function MobileLookupPanel({
   onToggleRow,
   onRefresh,
   onDelete,
+  onEvidenceChange,
 }: MobileLookupPanelProps) {
   const hasTextQuery = Boolean(query.trim());
   const mobileResults = lookupRows.slice(0, 20);
@@ -1421,6 +1438,7 @@ function MobileLookupPanel({
           onToggle={() => onToggleRow(row.id)}
           onRefresh={() => onRefresh(row)}
           onDelete={() => onDelete(row)}
+          onEvidenceChange={(evidence) => onEvidenceChange(row.tax_code, evidence)}
         />)}
         {lookupRows.length > mobileResults.length ? <p className="mobile-results-limit">Hiển thị 20 kết quả đầu tiên. Hãy nhập thêm ký tự để thu hẹp kết quả.</p> : null}
       </div>}
@@ -1438,9 +1456,10 @@ type MobileTaxpayerCardProps = {
   onToggle: () => void;
   onRefresh: () => void;
   onDelete: () => void;
+  onEvidenceChange: (evidence: TaxpayerEvidenceRecord | null) => void;
 };
 
-function MobileTaxpayerCard({ row, canWrite, isExpanded, isUpdating, disableRefresh, disableDelete, onToggle, onRefresh, onDelete }: MobileTaxpayerCardProps) {
+function MobileTaxpayerCard({ row, canWrite, isExpanded, isUpdating, disableRefresh, disableDelete, onToggle, onRefresh, onDelete, onEvidenceChange }: MobileTaxpayerCardProps) {
   const detail = row.taxpayer;
   const sourceIsStale = isSourceDataStale(detail?.source_updated_at ?? null);
   const name = detail?.name ?? row.source_vendor_name ?? "Chưa có tên";
@@ -1459,9 +1478,16 @@ function MobileTaxpayerCard({ row, canWrite, isExpanded, isUpdating, disableRefr
         <div><dt>Đơn vị</dt><dd>{taxpayerUnitLabel(row)}</dd></div>
         <div><dt>Năm</dt><dd>{row.source_sheet}</dd></div>
         <div className="mobile-detail-item-wide"><dt>Địa chỉ</dt><dd>{detail?.address ?? "Chưa có"}</dd></div>
-        <div><dt>Tra cứu lúc</dt><dd>{formatDate(detail?.last_checked_at ?? null)}</dd></div>
+              <div><dt>Lần tra cứu mới nhất</dt><dd>{formatDate(detail?.last_checked_at ?? null)}</dd></div>
         <div><dt>Nguồn dữ liệu</dt><dd>{formatSourceDate(detail?.source_updated_at ?? null)}</dd></div>
       </dl>
+      <TaxpayerEvidencePanel
+        taxCode={row.tax_code}
+        evidence={detail?.evidence}
+        canWrite={canWrite}
+        compact
+        onEvidenceChange={onEvidenceChange}
+      />
       {detail?.last_error ? <div className="mobile-detail-error"><WarningCircle size={16} /> {detail.last_error}</div> : null}
       {canWrite ? <div className="mobile-result-actions">
         <button className="outline-button" type="button" title={refreshTitle} disabled={disableRefresh} onClick={onRefresh}><ArrowsClockwise size={16} className={isUpdating ? "update-icon-spinning" : ""} /> {isUpdating ? "Đang mở CAPTCHA" : "Đối chiếu Cục Thuế"}</button>
@@ -1498,9 +1524,343 @@ function ActivitySkeleton() {
   return <>{Array.from({ length: 5 }, (_, index) => <tr className="skeleton-row" key={`activity-skeleton-${index}`}>{Array.from({ length: 6 }, (_, cell) => <td key={cell}><span /></td>)}</tr>)}</>;
 }
 
-function DetailPanel({ row }: { row: TaxpayerRow }) {
+const TAXPAYER_EVIDENCE_ACCEPT = "image/png,image/jpeg,image/webp";
+const TAXPAYER_EVIDENCE_MAX_BYTES = 4 * 1024 * 1024;
+
+type TaxpayerEvidenceView = TaxpayerEvidenceRecord & { url: string };
+type EvidenceViewResponse = { evidence?: TaxpayerEvidenceView | null; error?: string };
+type EvidenceMutationResponse = { evidence?: TaxpayerEvidenceRecord | null; error?: string; storageWarning?: string };
+
+function formatEvidenceSize(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "Kích thước không xác định";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function resolveClientEvidenceMimeType(file: File) {
+  const declaredType = file.type.toLowerCase() === "image/jpg" ? "image/jpeg" : file.type.toLowerCase();
+  if (TAXPAYER_EVIDENCE_ACCEPT.split(",").includes(declaredType)) return declaredType;
+  const extension = file.name.toLowerCase().split(".").pop() ?? "";
+  if (extension === "png") return "image/png";
+  if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
+  if (extension === "webp") return "image/webp";
+  return null;
+}
+
+function getClientEvidenceValidationError(file: File) {
+  if (!resolveClientEvidenceMimeType(file)) return "Chỉ chấp nhận ảnh PNG, JPG/JPEG hoặc WEBP.";
+  if (file.size <= 0) return "Ảnh tải lên đang rỗng.";
+  if (file.size > TAXPAYER_EVIDENCE_MAX_BYTES) return "Ảnh bằng chứng phải nhỏ hơn 4MB.";
+  return null;
+}
+
+function TaxpayerEvidencePanel({
+  taxCode,
+  evidence,
+  canWrite,
+  compact = false,
+  onEvidenceChange,
+}: {
+  taxCode: string;
+  evidence?: TaxpayerEvidenceRecord | null;
+  canWrite: boolean;
+  compact?: boolean;
+  onEvidenceChange?: (evidence: TaxpayerEvidenceRecord | null) => void;
+}) {
+  const [currentEvidence, setCurrentEvidence] = useState<TaxpayerEvidenceRecord | null>(evidence ?? null);
+  const [viewEvidence, setViewEvidence] = useState<TaxpayerEvidenceView | null>(null);
+  const [isLoadingView, setIsLoadingView] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+  const [isUploadChoiceOpen, setIsUploadChoiceOpen] = useState(false);
+  const [isScreenshotModalOpen, setIsScreenshotModalOpen] = useState(false);
+  const [screenshotFile, setScreenshotFile] = useState<File | null>(null);
+  const [screenshotPreviewUrl, setScreenshotPreviewUrl] = useState<string | null>(null);
+  const [screenshotError, setScreenshotError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const screenshotPasteAreaRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setCurrentEvidence(evidence ?? null);
+  }, [evidence]);
+
+  useEffect(() => {
+    if (!viewEvidence && !isScreenshotModalOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    const closeWithEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (isScreenshotModalOpen) closeScreenshotModal();
+      else setViewEvidence(null);
+    };
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", closeWithEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", closeWithEscape);
+    };
+  }, [isScreenshotModalOpen, viewEvidence]);
+
+  useEffect(() => {
+    if (!screenshotFile) {
+      setScreenshotPreviewUrl(null);
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(screenshotFile);
+    setScreenshotPreviewUrl(previewUrl);
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [screenshotFile]);
+
+  useEffect(() => {
+    if (!isScreenshotModalOpen) return;
+    const focusTimer = window.setTimeout(() => screenshotPasteAreaRef.current?.focus(), 0);
+    return () => window.clearTimeout(focusTimer);
+  }, [isScreenshotModalOpen]);
+
+  function closeScreenshotModal() {
+    if (isUploading) return;
+    setIsScreenshotModalOpen(false);
+    setScreenshotFile(null);
+    setScreenshotError(null);
+    setActionError(null);
+  }
+
+  function openScreenshotModal() {
+    if (!canWrite || isUploading || isDeleting) return;
+    setIsUploadChoiceOpen(false);
+    setScreenshotFile(null);
+    setScreenshotError(null);
+    setActionError(null);
+    setActionNotice(null);
+    setIsScreenshotModalOpen(true);
+  }
+
+  function requestUpload() {
+    if (!canWrite || isUploading || isDeleting) return;
+    setViewEvidence(null);
+    setActionError(null);
+    setActionNotice(null);
+    setIsUploadChoiceOpen((current) => !current);
+  }
+
+  function chooseFileUpload() {
+    if (!canWrite || isUploading || isDeleting) return;
+    setIsUploadChoiceOpen(false);
+    setActionError(null);
+    setActionNotice(null);
+    window.setTimeout(() => fileInputRef.current?.click(), 0);
+  }
+
+  async function openEvidence() {
+    if (isLoadingView || !currentEvidence) return;
+    setActionError(null);
+    setActionNotice(null);
+    setIsLoadingView(true);
+    try {
+      const response = await fetch(`/api/taxpayer/evidence?taxCode=${encodeURIComponent(taxCode)}`, { cache: "no-store" });
+      const payload = await response.json() as EvidenceViewResponse;
+      if (!response.ok || !payload.evidence?.url) {
+        throw new Error(payload.error ?? "Không thể mở ảnh bằng chứng.");
+      }
+      setViewEvidence(payload.evidence);
+    } catch (viewError) {
+      setActionError(viewError instanceof Error ? viewError.message : "Không thể mở ảnh bằng chứng.");
+    } finally {
+      setIsLoadingView(false);
+    }
+  }
+
+  async function uploadEvidenceFile(file: File, source: "file" | "paste") {
+    if (!canWrite || isUploading || isDeleting) return false;
+    const validationError = getClientEvidenceValidationError(file);
+    if (validationError) {
+      setActionError(validationError);
+      return false;
+    }
+
+    setActionError(null);
+    setActionNotice(null);
+    setIsConfirmingDelete(false);
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("taxCode", taxCode);
+      formData.append("file", file, file.name || "screenshot.png");
+      const response = await fetch("/api/taxpayer/evidence", {
+        method: "POST",
+        body: formData,
+        cache: "no-store",
+      });
+      const payload = await response.json() as EvidenceMutationResponse;
+      if (!response.ok || !payload.evidence) {
+        throw new Error(payload.error ?? "Không thể lưu ảnh bằng chứng.");
+      }
+      setCurrentEvidence(payload.evidence);
+      onEvidenceChange?.(payload.evidence);
+      setActionNotice(payload.storageWarning ?? (source === "paste" ? "Đã lưu screenshot bằng chứng." : "Đã cập nhật ảnh bằng chứng."));
+      return true;
+    } catch (uploadError) {
+      setActionError(uploadError instanceof Error ? uploadError.message : "Không thể lưu ảnh bằng chứng.");
+      return false;
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
+  function handleFileSelected(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file) void uploadEvidenceFile(file, "file");
+  }
+
+  function handleScreenshotPaste(event: ClipboardEvent<HTMLDivElement>) {
+    if (!isScreenshotModalOpen || isUploading || isDeleting) return;
+    const imageItem = Array.from(event.clipboardData.items).find((item) => item.kind === "file" && item.type.startsWith("image/"));
+    const file = imageItem?.getAsFile();
+    if (!file) return;
+    event.preventDefault();
+    const validationError = getClientEvidenceValidationError(file);
+    if (validationError) {
+      setScreenshotFile(null);
+      setScreenshotError(validationError);
+      return;
+    }
+    setScreenshotFile(file);
+    setScreenshotError(null);
+    setActionError(null);
+  }
+
+  async function saveScreenshot() {
+    if (!screenshotFile || isUploading) {
+      if (!screenshotFile) setScreenshotError("Hãy dán ảnh chụp màn hình trước khi lưu.");
+      return;
+    }
+    setScreenshotError(null);
+    const saved = await uploadEvidenceFile(screenshotFile, "paste");
+    if (saved) closeScreenshotModal();
+  }
+
+  async function deleteEvidence() {
+    if (!canWrite || !currentEvidence || isDeleting) return;
+    setActionError(null);
+    setActionNotice(null);
+    setIsDeleting(true);
+    try {
+      const response = await fetch(`/api/taxpayer/evidence?taxCode=${encodeURIComponent(taxCode)}`, {
+        method: "DELETE",
+        cache: "no-store",
+      });
+      const payload = await response.json() as EvidenceMutationResponse;
+      if (!response.ok) throw new Error(payload.error ?? "Không thể xóa ảnh bằng chứng.");
+      setCurrentEvidence(null);
+      setViewEvidence(null);
+      setIsConfirmingDelete(false);
+      onEvidenceChange?.(null);
+      setActionNotice(payload.storageWarning ?? "Đã xóa ảnh bằng chứng.");
+    } catch (deleteError) {
+      setActionError(deleteError instanceof Error ? deleteError.message : "Không thể xóa ảnh bằng chứng.");
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
+  const fieldClassName = compact ? "mobile-evidence-section" : "detail-item evidence-field";
+  const busy = isUploading || isDeleting;
+
+  return <>
+    <div className={fieldClassName} onClick={(event) => event.stopPropagation()}>
+      <span>Bằng chứng</span>
+      {currentEvidence ? <button className="evidence-link" type="button" onClick={() => void openEvidence()} disabled={busy || isLoadingView}>
+        <Eye size={15} /> {isLoadingView ? "Đang mở..." : "Xem"}
+      </button> : <button className="evidence-link" type="button" onClick={requestUpload} disabled={busy}>
+        <UploadSimple size={15} /> Tải ảnh lên
+      </button>}
+      {isUploadChoiceOpen ? <div className="evidence-upload-choice" role="menu" aria-label="Chọn nguồn ảnh">
+        <strong>Chọn nguồn ảnh</strong>
+        <button type="button" role="menuitem" onClick={chooseFileUpload} disabled={busy}>
+          <UploadSimple size={17} />
+          <span><b>Upload file</b><small>Chọn ảnh từ máy tính</small></span>
+        </button>
+        <button type="button" role="menuitem" onClick={openScreenshotModal} disabled={busy}>
+          <ImageSquare size={17} />
+          <span><b>Screenshot</b><small>Dán ảnh bằng Ctrl+V</small></span>
+        </button>
+      </div> : null}
+      <input ref={fileInputRef} className="evidence-file-input" type="file" accept={TAXPAYER_EVIDENCE_ACCEPT} onChange={handleFileSelected} disabled={!canWrite || busy} />
+      {actionError ? <div className="evidence-feedback evidence-feedback-error" role="alert"><WarningCircle size={14} /> {actionError}</div> : null}
+      {actionNotice ? <div className="evidence-feedback evidence-feedback-notice" role="status"><CheckCircle size={14} /> {actionNotice}</div> : null}
+    </div>
+    {viewEvidence ? <div className="evidence-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setViewEvidence(null); }}>
+      <section className="evidence-modal" role="dialog" aria-modal="true" aria-labelledby="evidence-modal-title" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="evidence-modal-header">
+          <div>
+            <span>BẰNG CHỨNG TRA CỨU</span>
+            <h2 id="evidence-modal-title">{viewEvidence.file_name}</h2>
+            <p>{formatEvidenceSize(viewEvidence.file_size)} · Cập nhật {formatDate(viewEvidence.updated_at)}</p>
+          </div>
+          <button className="icon-button evidence-modal-close" type="button" aria-label="Đóng ảnh bằng chứng" onClick={() => setViewEvidence(null)}><X size={19} /></button>
+        </div>
+        <div className="evidence-modal-preview">
+          <img src={viewEvidence.url} alt={`Ảnh bằng chứng tra cứu MST ${taxCode}`} />
+        </div>
+        {canWrite ? <div className="evidence-modal-actions">
+          {!isConfirmingDelete ? <>
+            <button className="outline-button" type="button" onClick={requestUpload} disabled={busy}><PencilSimple size={15} /> Cập nhật ảnh</button>
+            <button className="danger-button" type="button" onClick={() => setIsConfirmingDelete(true)} disabled={busy}><Trash size={15} /> Xóa ảnh</button>
+          </> : <div className="evidence-modal-delete-confirm" role="group" aria-label="Xác nhận xóa ảnh">
+            <span>Xóa ảnh bằng chứng này?</span>
+            <button className="danger-button" type="button" onClick={() => void deleteEvidence()} disabled={busy}>{isDeleting ? "Đang xóa..." : "Xác nhận xóa"}</button>
+            <button className="outline-button" type="button" onClick={() => setIsConfirmingDelete(false)} disabled={busy}>Hủy</button>
+          </div>}
+        </div> : null}
+      </section>
+    </div> : null}
+    {isScreenshotModalOpen ? <div className="evidence-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeScreenshotModal(); }}>
+      <section className="evidence-modal screenshot-modal" role="dialog" aria-modal="true" aria-labelledby="screenshot-modal-title" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="evidence-modal-header">
+          <div>
+            <span>DÁN SCREENSHOT</span>
+            <h2 id="screenshot-modal-title">Dán ảnh chụp màn hình</h2>
+            <p>Nhấn Ctrl+V vào vùng bên dưới, sau đó bấm Lưu ảnh.</p>
+          </div>
+          <button className="icon-button evidence-modal-close" type="button" aria-label="Đóng cửa sổ dán screenshot" onClick={closeScreenshotModal}><X size={19} /></button>
+        </div>
+        <div
+          ref={screenshotPasteAreaRef}
+          className={screenshotPreviewUrl ? "screenshot-paste-area screenshot-paste-area-filled" : "screenshot-paste-area"}
+          tabIndex={0}
+          role="button"
+          aria-label="Vùng dán screenshot bằng Ctrl+V"
+          onPaste={handleScreenshotPaste}
+        >
+          {screenshotPreviewUrl ? <div className="screenshot-paste-preview">
+            <img src={screenshotPreviewUrl} alt="Screenshot đang chờ lưu" />
+            <button className="evidence-link" type="button" onClick={() => { setScreenshotFile(null); setScreenshotError(null); }}>Dán lại</button>
+          </div> : <div className="screenshot-paste-placeholder">
+            <ImageSquare size={38} weight="duotone" />
+            <strong>Ctrl+V để dán screenshot</strong>
+            <span>Chỉ nhận ảnh PNG, JPG/JPEG hoặc WEBP, tối đa 4MB.</span>
+          </div>}
+        </div>
+        {screenshotError ? <div className="evidence-feedback evidence-feedback-error screenshot-modal-feedback" role="alert"><WarningCircle size={14} /> {screenshotError}</div> : null}
+        {actionError ? <div className="evidence-feedback evidence-feedback-error screenshot-modal-feedback" role="alert"><WarningCircle size={14} /> {actionError}</div> : null}
+        <div className="screenshot-modal-actions">
+          <button className="outline-button" type="button" onClick={closeScreenshotModal} disabled={isUploading}>Hủy</button>
+          <button className="export-button" type="button" onClick={() => void saveScreenshot()} disabled={!screenshotFile || isUploading}>{isUploading ? "Đang lưu..." : "Lưu ảnh"}</button>
+        </div>
+      </section>
+    </div> : null}
+  </>;
+}
+
+function DetailPanel({ row, canWrite, onEvidenceChange }: { row: TaxpayerRow; canWrite: boolean; onEvidenceChange: (evidence: TaxpayerEvidenceRecord | null) => void }) {
   const detail = row.taxpayer;
-  return <div className="detail-panel"><div className="detail-title"><div><span>CHI TIẾT MST</span><h3>{detail?.name ?? row.source_vendor_name ?? "Chưa có tên"}</h3></div><span className={statusClass(detail)}>{statusLabel(detail)}</span></div><div className="detail-grid"><DetailItem label="Mã số thuế" value={row.tax_code} mono /><DetailItem label="Đơn vị" value={taxpayerUnitLabel(row)} /><DetailItem label="Năm theo dõi" value={row.source_year ?? row.source_sheet} /><DetailItem label="Loại tổ chức" value={detail?.org_type} /><DetailItem label="Cơ quan thuế" value={detail?.tax_department} /><DetailItem label="Địa chỉ" value={detail?.address} wide /><DetailItem label="Dữ liệu lấy từ cục thuế lúc" value={formatDate(detail?.source_updated_at ?? null)} /><DetailItem label="Tra cứu lần trước" value={formatDate(detail?.previous_checked_at ?? null)} /><DetailItem label="Tra cứu lúc" value={formatDate(detail?.last_checked_at ?? null)} /></div>{detail?.last_error ? <div className="detail-error"><WarningCircle size={16} /> {detail.last_error}</div> : null}</div>;
+  return <div className="detail-panel" onClick={(event) => event.stopPropagation()}><div className="detail-title"><div><span>CHI TIẾT MST</span><h3>{detail?.name ?? row.source_vendor_name ?? "Chưa có tên"}</h3></div><span className={statusClass(detail)}>{statusLabel(detail)}</span></div><div className="detail-grid"><DetailItem label="Mã số thuế" value={row.tax_code} mono /><DetailItem label="Đơn vị" value={taxpayerUnitLabel(row)} /><DetailItem label="Năm theo dõi" value={row.source_year ?? row.source_sheet} /><DetailItem label="Loại tổ chức" value={detail?.org_type} /><DetailItem label="Cơ quan thuế" value={detail?.tax_department} /><TaxpayerEvidencePanel taxCode={row.tax_code} evidence={detail?.evidence} canWrite={canWrite} onEvidenceChange={onEvidenceChange} /><DetailItem label="Địa chỉ" value={detail?.address} wide /><DetailItem label="Dữ liệu lấy từ cục thuế lúc" value={formatDate(detail?.source_updated_at ?? null)} /><DetailItem label="Lần tra cứu trước đây" value={formatDate(detail?.previous_checked_at ?? null)} /><DetailItem label="Lần tra cứu mới nhất" value={formatDate(detail?.last_checked_at ?? null)} /></div>{detail?.last_error ? <div className="detail-error"><WarningCircle size={16} /> {detail.last_error}</div> : null}</div>;
 }
 
 function DetailItem({ label, value, mono = false, wide = false }: { label: string; value: string | null | undefined; mono?: boolean; wide?: boolean }) {

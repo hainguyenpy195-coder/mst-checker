@@ -14,6 +14,13 @@ export type Taxpayer = {
   next_check_at: string | null;
 };
 
+export type TaxpayerEvidence = {
+  file_name: string;
+  content_type: string;
+  file_size: number;
+  updated_at: string;
+};
+
 export type TaxpayerLookupResponse = {
   data: Taxpayer | null;
   meta: {
