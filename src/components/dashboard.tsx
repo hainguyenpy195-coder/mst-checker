@@ -158,7 +158,7 @@ type ManualLookupState = {
 };
 type ActivityRow = {
   id: number;
-  action: "taxpayer_added" | "taxpayer_deleted" | "excel_imported";
+  action: "taxpayer_added" | "taxpayer_deleted" | "taxpayer_code_updated" | "excel_imported";
   import_id: string | null;
   tax_code: string | null;
   taxpayer_name: string | null;
@@ -335,12 +335,14 @@ function matchesTaxpayerQuery(row: TaxpayerRow, needle: string) {
 function activityLabel(action: ActivityRow["action"]) {
   if (action === "taxpayer_added") return "Đã thêm";
   if (action === "taxpayer_deleted") return "Đã xóa";
+  if (action === "taxpayer_code_updated") return "Đã sửa MST";
   return "Nhập Excel";
 }
 
 function activityActionClass(action: ActivityRow["action"]) {
   if (action === "taxpayer_added") return "added";
   if (action === "taxpayer_deleted") return "deleted";
+  if (action === "taxpayer_code_updated") return "updated";
   return "imported";
 }
 
@@ -521,6 +523,13 @@ export default function Dashboard({ username, role }: DashboardProps) {
     setRows((currentRows) => currentRows.map((row) => row.tax_code === taxCode
       ? { ...row, taxpayer: { ...taxpayer, evidence: taxpayer.evidence ?? row.taxpayer?.evidence ?? null } }
       : row));
+  }
+
+  function patchTaxpayerCode(oldTaxCode: string, newTaxCode: string, taxpayer: TaxpayerDetail, message?: string) {
+    setRows((currentRows) => currentRows.map((row) => row.tax_code === oldTaxCode
+      ? { ...row, tax_code: newTaxCode, taxpayer: { ...taxpayer, evidence: taxpayer.evidence ?? row.taxpayer?.evidence ?? null } }
+      : row));
+    if (message) setNotice(message);
   }
 
   function patchTaxpayerEvidence(taxCode: string, evidence: TaxpayerEvidenceRecord | null) {
@@ -787,7 +796,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
           <button className="row-delete-button" type="button" title={`Xóa toàn bộ MST ${row.tax_code}`} aria-label={`Xóa toàn bộ MST ${row.tax_code}`} disabled={isDeleting || isRefreshingAll || Boolean(manualLookup)} onClick={(event) => { event.stopPropagation(); openDeleteDialog(row); }}><Trash size={13} /></button>
         </div> : null}</td>
       </tr>
-      {isExpanded ? <tr key={`${row.id}-detail`} className="detail-row"><td colSpan={8}><DetailPanel row={row} canWrite={canWrite} onEvidenceChange={(evidence) => patchTaxpayerEvidence(row.tax_code, evidence)} /></td></tr> : null}
+      {isExpanded ? <tr key={`${row.id}-detail`} className="detail-row"><td colSpan={8}><DetailPanel row={row} canWrite={canWrite} onTaxCodeChange={(newTaxCode, taxpayer, message) => patchTaxpayerCode(row.tax_code, newTaxCode, taxpayer, message)} onEvidenceChange={(evidence) => patchTaxpayerEvidence(row.tax_code, evidence)} /></td></tr> : null}
     </Fragment>;
   }
 
@@ -1332,6 +1341,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
             onToggleRow={(rowId) => setExpandedRow((current) => current === rowId ? null : rowId)}
             onRefresh={(row) => void refreshTaxpayer(row)}
             onDelete={openDeleteDialog}
+            onTaxCodeChange={(oldTaxCode, newTaxCode, taxpayer, message) => patchTaxpayerCode(oldTaxCode, newTaxCode, taxpayer, message)}
             onEvidenceChange={patchTaxpayerEvidence}
           />
           <section className="table-section desktop-data-table">
@@ -1422,6 +1432,7 @@ type MobileLookupPanelProps = {
   onToggleRow: (rowId: number) => void;
   onRefresh: (row: TaxpayerRow) => void;
   onDelete: (row: TaxpayerRow) => void;
+  onTaxCodeChange: (oldTaxCode: string, newTaxCode: string, taxpayer: TaxpayerDetail, message?: string) => void;
   onEvidenceChange: (taxCode: string, evidence: TaxpayerEvidenceRecord | null) => void;
 };
 
@@ -1445,6 +1456,7 @@ function MobileLookupPanel({
   onToggleRow,
   onRefresh,
   onDelete,
+  onTaxCodeChange,
   onEvidenceChange,
 }: MobileLookupPanelProps) {
   const hasTextQuery = Boolean(query.trim());
@@ -1509,6 +1521,7 @@ function MobileLookupPanel({
           onToggle={() => onToggleRow(row.id)}
           onRefresh={() => onRefresh(row)}
           onDelete={() => onDelete(row)}
+          onTaxCodeChange={(newTaxCode, taxpayer, message) => onTaxCodeChange(row.tax_code, newTaxCode, taxpayer, message)}
           onEvidenceChange={(evidence) => onEvidenceChange(row.tax_code, evidence)}
         />)}
         {lookupRows.length > mobileResults.length ? <p className="mobile-results-limit">Hiển thị 20 kết quả đầu tiên. Hãy nhập thêm ký tự để thu hẹp kết quả.</p> : null}
@@ -1527,10 +1540,11 @@ type MobileTaxpayerCardProps = {
   onToggle: () => void;
   onRefresh: () => void;
   onDelete: () => void;
+  onTaxCodeChange: (newTaxCode: string, taxpayer: TaxpayerDetail, message?: string) => void;
   onEvidenceChange: (evidence: TaxpayerEvidenceRecord | null) => void;
 };
 
-function MobileTaxpayerCard({ row, canWrite, isExpanded, isUpdating, disableRefresh, disableDelete, onToggle, onRefresh, onDelete, onEvidenceChange }: MobileTaxpayerCardProps) {
+function MobileTaxpayerCard({ row, canWrite, isExpanded, isUpdating, disableRefresh, disableDelete, onToggle, onRefresh, onDelete, onTaxCodeChange, onEvidenceChange }: MobileTaxpayerCardProps) {
   const detail = row.taxpayer;
   const sourceIsStale = isSourceDataStale(detail?.source_updated_at ?? null);
   const name = detail?.name ?? row.source_vendor_name ?? "Chưa có tên";
@@ -1545,7 +1559,7 @@ function MobileTaxpayerCard({ row, canWrite, isExpanded, isUpdating, disableRefr
     </button>
     {isExpanded ? <div className="mobile-result-detail">
       <dl className="mobile-detail-list">
-        <div><dt>Mã số thuế</dt><dd className="mono-value">{row.tax_code}</dd></div>
+        <TaxpayerCodeEditor taxCode={row.tax_code} canWrite={canWrite} compact onSaved={onTaxCodeChange} />
         <div><dt>Đơn vị</dt><dd>{taxpayerUnitLabel(row)}</dd></div>
         <div><dt>Năm</dt><dd>{row.source_sheet}</dd></div>
         <div className="mobile-detail-item-wide"><dt>Địa chỉ</dt><dd>{detail?.address ?? "Chưa có"}</dd></div>
@@ -1930,9 +1944,70 @@ function TaxpayerEvidencePanel({
   </>;
 }
 
-function DetailPanel({ row, canWrite, onEvidenceChange }: { row: TaxpayerRow; canWrite: boolean; onEvidenceChange: (evidence: TaxpayerEvidenceRecord | null) => void }) {
+function DetailPanel({ row, canWrite, onTaxCodeChange, onEvidenceChange }: { row: TaxpayerRow; canWrite: boolean; onTaxCodeChange: (newTaxCode: string, taxpayer: TaxpayerDetail, message?: string) => void; onEvidenceChange: (evidence: TaxpayerEvidenceRecord | null) => void }) {
   const detail = row.taxpayer;
-  return <div className="detail-panel" onClick={(event) => event.stopPropagation()}><div className="detail-title"><div><span>CHI TIẾT MST</span><h3>{detail?.name ?? row.source_vendor_name ?? "Chưa có tên"}</h3></div><span className={statusClass(detail)}>{statusLabel(detail)}</span></div>{taxpayerReviewLabel(detail) ? <div className="detail-review"><WarningCircle size={16} /> {taxpayerReviewLabel(detail)}</div> : null}<div className="detail-grid"><DetailItem label="Mã số thuế" value={row.tax_code} mono /><DetailItem label="Đơn vị" value={taxpayerUnitLabel(row)} /><DetailItem label="Năm theo dõi" value={row.source_year ?? row.source_sheet} /><DetailItem label="Loại tổ chức" value={detail?.org_type} /><DetailItem label="Cơ quan thuế" value={detail?.tax_department} /><TaxpayerEvidencePanel taxCode={row.tax_code} evidence={detail?.evidence} canWrite={canWrite} onEvidenceChange={onEvidenceChange} /><DetailItem label="Địa chỉ" value={detail?.address} wide /><DetailItem label="Dữ liệu lấy từ cục thuế lúc" value={formatDate(detail?.source_updated_at ?? null)} /><DetailItem label="Lần tra cứu trước đây" value={formatDate(detail?.previous_checked_at ?? null)} /><DetailItem label="Lần tra cứu mới nhất" value={formatDate(detail?.last_checked_at ?? null)} /></div>{detail?.last_error ? <div className="detail-error"><WarningCircle size={16} /> {detail.last_error}</div> : null}</div>;
+  return <div className="detail-panel" onClick={(event) => event.stopPropagation()}><div className="detail-title"><div><span>CHI TIẾT MST</span><h3>{detail?.name ?? row.source_vendor_name ?? "Chưa có tên"}</h3></div><span className={statusClass(detail)}>{statusLabel(detail)}</span></div>{taxpayerReviewLabel(detail) ? <div className="detail-review"><WarningCircle size={16} /> {taxpayerReviewLabel(detail)}</div> : null}<div className="detail-grid"><TaxpayerCodeEditor taxCode={row.tax_code} canWrite={canWrite} onSaved={onTaxCodeChange} /><DetailItem label="Đơn vị" value={taxpayerUnitLabel(row)} /><DetailItem label="Năm theo dõi" value={row.source_year ?? row.source_sheet} /><DetailItem label="Loại tổ chức" value={detail?.org_type} /><DetailItem label="Cơ quan thuế" value={detail?.tax_department} /><TaxpayerEvidencePanel taxCode={row.tax_code} evidence={detail?.evidence} canWrite={canWrite} onEvidenceChange={onEvidenceChange} /><DetailItem label="Địa chỉ" value={detail?.address} wide /><DetailItem label="Dữ liệu lấy từ cục thuế lúc" value={formatDate(detail?.source_updated_at ?? null)} /><DetailItem label="Lần tra cứu trước đây" value={formatDate(detail?.previous_checked_at ?? null)} /><DetailItem label="Lần tra cứu mới nhất" value={formatDate(detail?.last_checked_at ?? null)} /></div>{detail?.last_error ? <div className="detail-error"><WarningCircle size={16} /> {detail.last_error}</div> : null}</div>;
+}
+
+function TaxpayerCodeEditor({ taxCode, canWrite, compact = false, onSaved }: { taxCode: string; canWrite: boolean; compact?: boolean; onSaved: (newTaxCode: string, taxpayer: TaxpayerDetail, message?: string) => void }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftTaxCode, setDraftTaxCode] = useState(taxCode);
+  const [isSaving, setIsSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isEditing) setDraftTaxCode(taxCode);
+  }, [isEditing, taxCode]);
+
+  function startEditing() {
+    if (!canWrite || isSaving) return;
+    setDraftTaxCode(taxCode);
+    setEditError(null);
+    setIsEditing(true);
+  }
+
+  function cancelEditing() {
+    if (isSaving) return;
+    setDraftTaxCode(taxCode);
+    setEditError(null);
+    setIsEditing(false);
+  }
+
+  async function saveTaxCode() {
+    const normalizedTaxCode = normalizeTaxCode(draftTaxCode);
+    if (!isValidTaxCode(normalizedTaxCode)) {
+      setEditError(TAX_CODE_FORMAT_HINT);
+      return;
+    }
+
+    setIsSaving(true);
+    setEditError(null);
+    try {
+      const response = await fetch("/api/taxpayer", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ oldTaxCode: taxCode, newTaxCode: normalizedTaxCode }),
+        cache: "no-store",
+      });
+      const payload = await response.json().catch(() => ({})) as { error?: string; taxCode?: string; taxpayer?: TaxpayerDetail; message?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Không thể sửa mã số thuế.");
+      if (!payload.taxCode || !payload.taxpayer) throw new Error("MST đã sửa nhưng dữ liệu trả về chưa đầy đủ.");
+      setIsEditing(false);
+      setDraftTaxCode(payload.taxCode);
+      onSaved(payload.taxCode, payload.taxpayer, payload.message);
+    } catch (saveError) {
+      setEditError(saveError instanceof Error ? saveError.message : "Không thể sửa mã số thuế.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  const value = isEditing ? <div className="tax-code-edit-controls"><input value={draftTaxCode} onChange={(event) => { setDraftTaxCode(event.target.value); setEditError(null); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void saveTaxCode(); } if (event.key === "Escape") cancelEditing(); }} inputMode="numeric" pattern={TAX_CODE_INPUT_PATTERN} maxLength={14} autoFocus disabled={isSaving} aria-label="Mã số thuế mới" /><button className="tax-code-save-button" type="button" title="Lưu MST và cập nhật endpoint" aria-label="Lưu MST và cập nhật endpoint" onClick={() => void saveTaxCode()} disabled={isSaving}><CheckCircle size={16} /></button><button className="tax-code-cancel-button" type="button" title="Hủy sửa MST" aria-label="Hủy sửa MST" onClick={cancelEditing} disabled={isSaving}><X size={16} /></button></div> : <div className="tax-code-value"><strong className="mono-value">{taxCode}</strong>{canWrite ? <button className="detail-edit-button" type="button" title={`Sửa MST ${taxCode}`} aria-label={`Sửa MST ${taxCode}`} onClick={startEditing}><PencilSimple size={15} /></button> : null}</div>;
+  const error = editError ? <small className="tax-code-edit-error" role="alert">{editError}</small> : null;
+
+  return compact
+    ? <div className="mobile-tax-code-editor"><dt>Mã số thuế</dt><dd>{value}{error}</dd></div>
+    : <div className="detail-item detail-tax-code-item"><span>Mã số thuế</span>{value}{error}</div>;
 }
 
 function DetailItem({ label, value, mono = false, wide = false }: { label: string; value: string | null | undefined; mono?: boolean; wide?: boolean }) {

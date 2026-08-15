@@ -262,6 +262,19 @@ button:not(:disabled):active { transform: translateY(1px); }
 .detail-item span { color: var(--muted); font-size: 11px; }
 .detail-item strong { color: var(--ink); font-size: 13px; font-weight: 620; line-height: 1.5; }
 .mono-value { color: var(--accent-dark) !important; font-family: inherit; font-variant-numeric: tabular-nums; }
+.tax-code-value { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.detail-edit-button { display: inline-grid; width: 25px; height: 25px; flex: 0 0 25px; place-items: center; padding: 0; color: var(--accent-dark); background: var(--accent-soft); border: 1px solid var(--accent-border); border-radius: 7px; transition: color 150ms ease, background 150ms ease, border-color 150ms ease; }
+.detail-edit-button:hover:not(:disabled) { color: #ffffff; background: var(--accent); border-color: var(--accent); }
+.tax-code-edit-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.tax-code-edit-controls input { width: min(100%, 180px); min-width: 0; height: 30px; padding: 0 8px; color: var(--ink); background: var(--surface); border: 1px solid var(--accent-border); border-radius: 7px; outline: 0; font-family: inherit; font-size: 12px; font-variant-numeric: tabular-nums; }
+.tax-code-edit-controls input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.tax-code-save-button, .tax-code-cancel-button { display: inline-grid; width: 30px; height: 30px; place-items: center; padding: 0; border-radius: 7px; transition: color 150ms ease, background 150ms ease, border-color 150ms ease; }
+.tax-code-save-button { color: var(--success); background: var(--success-soft); border: 1px solid var(--success-border); }
+.tax-code-save-button:hover:not(:disabled) { color: #ffffff; background: var(--success); border-color: var(--success); }
+.tax-code-cancel-button { color: var(--muted); background: var(--surface); border: 1px solid var(--line); }
+.tax-code-cancel-button:hover:not(:disabled) { color: var(--danger); border-color: var(--danger-border); background: var(--danger-soft); }
+.tax-code-save-button:disabled, .tax-code-cancel-button:disabled, .detail-edit-button:disabled { cursor: wait; opacity: 0.58; }
+.tax-code-edit-error { display: block; margin-top: 5px; color: var(--danger); font-size: 10px; line-height: 1.4; }
 .evidence-field, .mobile-evidence-section { position: relative; min-width: 0; }
 .evidence-link { display: inline-flex; align-items: center; gap: 5px; padding: 0; color: var(--accent-dark); border: 0; background: transparent; font-size: 11px; font-weight: 700; line-height: 1.4; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; transition: color 150ms ease, opacity 150ms ease; }
 .evidence-link:hover:not(:disabled) { color: var(--brand-blue); }
@@ -340,6 +353,7 @@ button:not(:disabled):active { transform: translateY(1px); }
 .activity-action { display: inline-flex; align-items: center; min-height: 24px; font-size: 12px; font-weight: 620; }
 .activity-action-added { color: var(--success); }
 .activity-action-deleted { color: var(--danger); }
+.activity-action-updated { color: var(--warning); }
 .activity-action-imported { color: var(--accent-dark); }
 .activity-event-detail { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; font-weight: 500; }
 
@@ -634,6 +648,10 @@ button:not(:disabled):active { transform: translateY(1px); }
   .mobile-result-detail { padding: 0 15px 15px; border-top: 1px solid var(--line); }
   .mobile-detail-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 15px 0 0; }
   .mobile-detail-list div { display: grid; gap: 4px; min-width: 0; }
+  .mobile-tax-code-editor { display: grid; gap: 4px; min-width: 0; }
+  .mobile-tax-code-editor dd { display: grid; gap: 5px; }
+  .mobile-tax-code-editor .tax-code-edit-controls { flex-wrap: nowrap; }
+  .mobile-tax-code-editor .tax-code-edit-controls input { width: 100%; }
   .mobile-detail-item-wide { grid-column: 1 / -1; }
   .mobile-detail-list dt { color: var(--muted); font-size: 10px; }
   .mobile-detail-list dd { min-width: 0; margin: 0; color: var(--ink); font-size: 12px; font-weight: 620; line-height: 1.45; overflow-wrap: anywhere; }

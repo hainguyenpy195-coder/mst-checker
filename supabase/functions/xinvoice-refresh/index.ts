@@ -185,7 +185,7 @@ function normalizeTaxCode(value: string) {
 }
 
 function isValidTaxCode(value: string) {
-  return /^(?:\d{10}|\d{10}-\d{3}|\d{12})$/.test(value);
+  return /^(?:\d{10}|\d{11}|\d{10}-\d{3}|\d{12})$/.test(value);
 }
 
 function retryAfterHeader(response: Response, fallbackSeconds: number) {

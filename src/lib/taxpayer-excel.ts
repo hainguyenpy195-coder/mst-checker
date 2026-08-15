@@ -140,11 +140,13 @@ function normalizedHeader(value: unknown) {
 function normalizeExcelTaxCode(value: unknown) {
   const taxCode = normalizeTaxCode(cellText(value));
 
-  // Excel stores codes entered as numbers without leading zeroes. Vietnamese
-  // taxpayer codes are commonly 10 or 12 digits, so recover the omitted zero
-  // for the only lengths that can become valid after numeric conversion.
-  if (/^\d{9}$/.test(taxCode)) return taxCode.padStart(10, "0");
-  if (/^\d{11}$/.test(taxCode)) return taxCode.padStart(12, "0");
+  // Only numeric Excel cells can have lost leading zeroes. A string cell is
+  // intentional user input and must remain exactly as entered; in particular,
+  // an old 11-digit MST must not be changed into a different 12-digit code.
+  if (typeof value === "number") {
+    if (/^\d{9}$/.test(taxCode)) return taxCode.padStart(10, "0");
+    if (/^\d{11}$/.test(taxCode)) return taxCode.padStart(12, "0");
+  }
 
   return taxCode;
 }
@@ -236,7 +238,8 @@ export async function parseTaxpayerWorkbook(buffer: Buffer | Uint8Array): Promis
       }
 
       const row = worksheet.getRow(rowNumber);
-      const rawTaxCode = cellText(row.getCell(header.taxCodeColumn).value);
+      const taxCodeCellValue = row.getCell(header.taxCodeColumn).value;
+      const rawTaxCode = cellText(taxCodeCellValue);
       if (!rawTaxCode) continue;
 
       totalRows += 1;
@@ -244,7 +247,7 @@ export async function parseTaxpayerWorkbook(buffer: Buffer | Uint8Array): Promis
         throw new Error(`File excel phải dưới ${maxRows} dòng mã số thuế`);
       }
 
-      const taxCode = normalizeExcelTaxCode(rawTaxCode);
+      const taxCode = normalizeExcelTaxCode(taxCodeCellValue);
       if (!isValidTaxCode(taxCode)) {
         invalidRowCount += 1;
         if (invalidRows.length < 100) {
