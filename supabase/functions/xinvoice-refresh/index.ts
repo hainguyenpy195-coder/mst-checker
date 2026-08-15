@@ -98,6 +98,7 @@ const PRIMARY_ENDPOINT_KEY = "primary_tax_lookup_endpoint";
 const FALLBACK_ENDPOINT_KEY = "fallback_tax_lookup_endpoint";
 const STATUS_BATCH_SIZE = 40;
 const STATUS_PRIMARY_BATCH_SIZE = 20;
+const TAXPAYER_NOT_FOUND_MESSAGE = "Không tìm thấy mã số thuế hoặc chưa chính xác.";
 
 let secretKey: string | undefined;
 if (secretKeysJson) {
@@ -300,6 +301,10 @@ async function fetchWithFallback(taxCode: string, endpoints: EndpointSettings): 
         primaryError instanceof RefreshWorkerError ? primaryError.retryAfterSeconds ?? 0 : 0,
         fallbackError instanceof RefreshWorkerError ? fallbackError.retryAfterSeconds ?? 0 : 0,
       );
+      if (primaryMessage === "XINVOICE_HTTP_404" && fallbackMessage.startsWith("VIETQR_NO_DATA")) {
+        console.warn(`Taxpayer lookup did not find a matching code: ${primaryMessage}; ${fallbackMessage}`);
+        throw new RefreshWorkerError(TAXPAYER_NOT_FOUND_MESSAGE);
+      }
       throw new RefreshWorkerError(`${primaryMessage}; ${fallbackMessage}`, retryAfterSeconds || undefined);
     }
   }
@@ -325,6 +330,13 @@ async function fetchWithPreferredEndpoint(taxCode: string, endpoints: EndpointSe
         firstError instanceof RefreshWorkerError ? firstError.retryAfterSeconds ?? 0 : 0,
         secondError instanceof RefreshWorkerError ? secondError.retryAfterSeconds ?? 0 : 0,
       );
+      const isTaxpayerNotFound =
+        (firstMessage === "XINVOICE_HTTP_404" && secondMessage.startsWith("VIETQR_NO_DATA")) ||
+        (secondMessage === "XINVOICE_HTTP_404" && firstMessage.startsWith("VIETQR_NO_DATA"));
+      if (isTaxpayerNotFound) {
+        console.warn(`Taxpayer lookup did not find a matching code: ${firstMessage}; ${secondMessage}`);
+        throw new RefreshWorkerError(TAXPAYER_NOT_FOUND_MESSAGE);
+      }
       throw new RefreshWorkerError(`${firstMessage}; ${secondMessage}`, retryAfterSeconds || undefined);
     }
   }

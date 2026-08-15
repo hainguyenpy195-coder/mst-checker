@@ -12,6 +12,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import type { AppRole } from "@/lib/app-auth";
+import { formatTaxpayerError } from "@/lib/taxpayer-error";
 import { isValidTaxCode, normalizeTaxCode } from "@/lib/tax-code";
 import PurchaseInvoiceExcelImportModal, {
   type PurchaseInvoiceImportSummary,
@@ -140,7 +141,7 @@ function taxpayerStatusMeta(invoice: PurchaseInvoiceRecord): TaxpayerStatusMeta 
     return {
       label: "Lỗi kiểm tra",
       className: "invoice-taxpayer-status invoice-taxpayer-error",
-      title: taxpayer.last_error,
+      title: formatTaxpayerError(taxpayer.last_error) ?? taxpayer.last_error,
     };
   }
 

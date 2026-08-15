@@ -18,6 +18,7 @@ import {
 } from "@phosphor-icons/react";
 import type { AppRole } from "@/lib/app-auth";
 import type { InvoiceQuota, InvoiceRecord, InvoiceTaxpayerSummary, InvoiceVerificationStatus } from "@/lib/invoice-types";
+import { formatTaxpayerError } from "@/lib/taxpayer-error";
 
 const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
 const PAGE_SIZE = 100;
@@ -130,7 +131,7 @@ function taxpayerStatusMeta(taxpayer: InvoiceTaxpayerSummary | null | undefined)
     return {
       label: "Lỗi kiểm tra",
       className: "invoice-taxpayer-status invoice-taxpayer-error",
-      title: taxpayer.last_error,
+      title: formatTaxpayerError(taxpayer.last_error) ?? taxpayer.last_error,
     };
   }
 

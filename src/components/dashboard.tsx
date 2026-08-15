@@ -29,6 +29,7 @@ import {
 } from "@phosphor-icons/react";
 import { getDashboardHref, getDashboardViewFromPathname, type DashboardView } from "@/lib/dashboard-routes";
 import { isValidTaxCode, normalizeTaxCode, TAX_CODE_FORMAT_HINT, TAX_CODE_INPUT_PATTERN } from "@/lib/tax-code";
+import { formatTaxpayerError } from "@/lib/taxpayer-error";
 import { formatTaxpayerUnitHeading, getTaxpayerUnitDisplayName, getTaxpayerUnitOrder } from "@/lib/taxpayer-units";
 import type { AppRole } from "@/lib/app-auth";
 import type { TaxpayerEvidence as TaxpayerEvidenceRecord } from "@/lib/types";
@@ -1574,7 +1575,7 @@ function MobileTaxpayerCard({ row, canWrite, isExpanded, isUpdating, disableRefr
         onEvidenceChange={onEvidenceChange}
       />
       {taxpayerReviewLabel(detail) ? <div className="mobile-detail-review"><WarningCircle size={16} /> {taxpayerReviewLabel(detail)}</div> : null}
-      {detail?.last_error ? <div className="mobile-detail-error"><WarningCircle size={16} /> {detail.last_error}</div> : null}
+      {formatTaxpayerError(detail?.last_error) ? <div className="mobile-detail-error"><WarningCircle size={16} /> {formatTaxpayerError(detail?.last_error)}</div> : null}
       {canWrite ? <div className="mobile-result-actions">
         <button className="outline-button" type="button" title={refreshTitle} disabled={disableRefresh} onClick={onRefresh}><ArrowsClockwise size={16} className={isUpdating ? "update-icon-spinning" : ""} /> {isUpdating ? "Đang mở CAPTCHA" : "Đối chiếu Cục Thuế"}</button>
         <button className="mobile-delete-action" type="button" disabled={disableDelete} onClick={onDelete}><Trash size={16} /> Xóa</button>
@@ -1946,7 +1947,7 @@ function TaxpayerEvidencePanel({
 
 function DetailPanel({ row, canWrite, onTaxCodeChange, onEvidenceChange }: { row: TaxpayerRow; canWrite: boolean; onTaxCodeChange: (newTaxCode: string, taxpayer: TaxpayerDetail, message?: string) => void; onEvidenceChange: (evidence: TaxpayerEvidenceRecord | null) => void }) {
   const detail = row.taxpayer;
-  return <div className="detail-panel" onClick={(event) => event.stopPropagation()}><div className="detail-title"><div><span>CHI TIẾT MST</span><h3>{detail?.name ?? row.source_vendor_name ?? "Chưa có tên"}</h3></div><span className={statusClass(detail)}>{statusLabel(detail)}</span></div>{taxpayerReviewLabel(detail) ? <div className="detail-review"><WarningCircle size={16} /> {taxpayerReviewLabel(detail)}</div> : null}<div className="detail-grid"><TaxpayerCodeEditor taxCode={row.tax_code} canWrite={canWrite} onSaved={onTaxCodeChange} /><DetailItem label="Đơn vị" value={taxpayerUnitLabel(row)} /><DetailItem label="Năm theo dõi" value={row.source_year ?? row.source_sheet} /><DetailItem label="Loại tổ chức" value={detail?.org_type} /><DetailItem label="Cơ quan thuế" value={detail?.tax_department} /><TaxpayerEvidencePanel taxCode={row.tax_code} evidence={detail?.evidence} canWrite={canWrite} onEvidenceChange={onEvidenceChange} /><DetailItem label="Địa chỉ" value={detail?.address} wide /><DetailItem label="Dữ liệu lấy từ cục thuế lúc" value={formatDate(detail?.source_updated_at ?? null)} /><DetailItem label="Lần tra cứu trước đây" value={formatDate(detail?.previous_checked_at ?? null)} /><DetailItem label="Lần tra cứu mới nhất" value={formatDate(detail?.last_checked_at ?? null)} /></div>{detail?.last_error ? <div className="detail-error"><WarningCircle size={16} /> {detail.last_error}</div> : null}</div>;
+  return <div className="detail-panel" onClick={(event) => event.stopPropagation()}><div className="detail-title"><div><span>CHI TIẾT MST</span><h3>{detail?.name ?? row.source_vendor_name ?? "Chưa có tên"}</h3></div><span className={statusClass(detail)}>{statusLabel(detail)}</span></div>{taxpayerReviewLabel(detail) ? <div className="detail-review"><WarningCircle size={16} /> {taxpayerReviewLabel(detail)}</div> : null}<div className="detail-grid"><TaxpayerCodeEditor taxCode={row.tax_code} canWrite={canWrite} onSaved={onTaxCodeChange} /><DetailItem label="Đơn vị" value={taxpayerUnitLabel(row)} /><DetailItem label="Năm theo dõi" value={row.source_year ?? row.source_sheet} /><DetailItem label="Loại tổ chức" value={detail?.org_type} /><DetailItem label="Cơ quan thuế" value={detail?.tax_department} /><TaxpayerEvidencePanel taxCode={row.tax_code} evidence={detail?.evidence} canWrite={canWrite} onEvidenceChange={onEvidenceChange} /><DetailItem label="Địa chỉ" value={detail?.address} wide /><DetailItem label="Dữ liệu lấy từ cục thuế lúc" value={formatDate(detail?.source_updated_at ?? null)} /><DetailItem label="Lần tra cứu trước đây" value={formatDate(detail?.previous_checked_at ?? null)} /><DetailItem label="Lần tra cứu mới nhất" value={formatDate(detail?.last_checked_at ?? null)} /></div>{formatTaxpayerError(detail?.last_error) ? <div className="detail-error"><WarningCircle size={16} /> {formatTaxpayerError(detail?.last_error)}</div> : null}</div>;
 }
 
 function TaxpayerCodeEditor({ taxCode, canWrite, compact = false, onSaved }: { taxCode: string; canWrite: boolean; compact?: boolean; onSaved: (newTaxCode: string, taxpayer: TaxpayerDetail, message?: string) => void }) {
