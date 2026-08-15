@@ -45,7 +45,7 @@ type CommitResponse = {
 };
 
 type RefreshResponse = {
-  results?: Array<{ tax_code?: string; ok?: boolean; error?: string }>;
+  results?: Array<{ tax_code?: string; ok?: boolean; error?: string; skipped?: boolean; skipReason?: string; needsManualReview?: boolean }>;
   error?: string;
 };
 
@@ -59,6 +59,7 @@ type ImportSummary = {
   addedCount: number;
   updatedCount: number;
   failedCount: number;
+  reviewCount: number;
 };
 
 type Props = {
@@ -81,7 +82,7 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
   const [isReading, setIsReading] = useState(false);
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [showInvalidRows, setShowInvalidRows] = useState(false);
-  const [progress, setProgress] = useState({ current: 0, total: 0, added: 0, updated: 0, failed: 0 });
+  const [progress, setProgress] = useState({ current: 0, total: 0, added: 0, updated: 0, failed: 0, review: 0 });
   const [error, setError] = useState<string | null>(null);
   const [refreshErrors, setRefreshErrors] = useState<string[]>([]);
   const [summary, setSummary] = useState<ImportSummary | null>(null);
@@ -162,7 +163,7 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
     setError(null);
     setRefreshErrors([]);
     setSummary(null);
-    setProgress({ current: 0, total: candidates.length, added: 0, updated: 0, failed: 0 });
+    setProgress({ current: 0, total: candidates.length, added: 0, updated: 0, failed: 0, review: 0 });
     setPhase("adding");
 
     const addedTaxCodes: string[] = [];
@@ -186,19 +187,16 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
         }));
       }
 
-      if (!addedTaxCodes.length) {
-        await completeImport(importId, 0, 0, 0);
-        return;
-      }
-
-      setProgress((current) => ({ ...current, current: 0, total: addedTaxCodes.length }));
+      const refreshTaxCodes = candidates.map((candidate) => candidate.taxCode);
+      setProgress((current) => ({ ...current, current: 0, total: refreshTaxCodes.length }));
       setPhase("refreshing");
       let updatedCount = 0;
       let failedCount = 0;
+      let reviewCount = 0;
       const failures: string[] = [];
 
-      for (let index = 0; index < addedTaxCodes.length; index += REFRESH_BATCH_SIZE) {
-        const batch = addedTaxCodes.slice(index, index + REFRESH_BATCH_SIZE);
+      for (let index = 0; index < refreshTaxCodes.length; index += REFRESH_BATCH_SIZE) {
+        const batch = refreshTaxCodes.slice(index, index + REFRESH_BATCH_SIZE);
         try {
           const response = await fetch("/api/taxpayers/import/refresh", {
             method: "POST",
@@ -212,9 +210,11 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
             failures.push(payload.error ?? `Không thể cập nhật ${batch.length} MST.`);
           } else {
             const results = payload.results ?? [];
-            const successfulCount = results.filter((result) => result.ok === true).length;
+            const reviewBatchCount = results.filter((result) => result.ok === true && result.needsManualReview === true).length;
+            const successfulCount = results.filter((result) => result.ok === true && result.needsManualReview !== true).length;
             updatedCount += successfulCount;
-            failedCount += Math.max(0, batch.length - successfulCount);
+            reviewCount += reviewBatchCount;
+            failedCount += Math.max(0, batch.length - successfulCount - reviewBatchCount);
             failures.push(...results.filter((result) => result.ok !== true && result.error).map((result) => (result.tax_code ?? "MST") + ": " + result.error));
           }
         } catch (refreshError) {
@@ -224,33 +224,35 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
 
         setProgress((current) => ({
           ...current,
-          current: Math.min(index + batch.length, addedTaxCodes.length),
+          current: Math.min(index + batch.length, refreshTaxCodes.length),
           added: addedTaxCodes.length,
           updated: updatedCount,
           failed: failedCount,
+          review: reviewCount,
         }));
       }
 
-      const completedSummary = { addedCount: addedTaxCodes.length, updatedCount, failedCount };
+      const completedSummary = { addedCount: addedTaxCodes.length, updatedCount, failedCount, reviewCount };
       setRefreshErrors(failures.slice(0, 20));
-      await completeImport(importId, completedSummary.updatedCount, completedSummary.failedCount, completedSummary.addedCount);
+      await completeImport(importId, completedSummary.updatedCount, completedSummary.failedCount, completedSummary.reviewCount, completedSummary.addedCount);
     } catch (importError) {
       setError(importError instanceof Error ? importError.message : "Không thể hoàn tất nhập Excel.");
       setPhase("error");
     }
   }
 
-  async function completeImport(currentImportId: string, updatedCount: number, failedCount: number, fallbackAddedCount: number) {
+  async function completeImport(currentImportId: string, updatedCount: number, failedCount: number, reviewCount: number, fallbackAddedCount: number) {
     const response = await fetch("/api/taxpayers/import/complete", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ importId: currentImportId, updatedCount, failedCount }),
+      body: JSON.stringify({ importId: currentImportId, updatedCount, failedCount, reviewCount }),
       cache: "no-store",
     });
     const payload = await response.json().catch(() => ({})) as {
       addedCount?: number;
       updatedCount?: number;
       failedCount?: number;
+      reviewCount?: number;
       error?: string;
     };
     if (!response.ok) throw new Error(payload.error ?? "Không thể ghi sự kiện nhập Excel vào Lịch sử.");
@@ -259,6 +261,7 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
       addedCount: payload.addedCount ?? fallbackAddedCount,
       updatedCount: payload.updatedCount ?? updatedCount,
       failedCount: payload.failedCount ?? failedCount,
+      reviewCount: payload.reviewCount ?? reviewCount,
     };
     setSummary(completedSummary);
     setPhase("complete");
@@ -310,7 +313,7 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
         </button>
       </div>
       <div className="taxpayer-import-message" role="status"><CheckCircle size={18} /> {preview?.message ?? `Đã đọc ${formatCount(candidates.length)} MST và nguồn dữ liệu.`}</div>
-      {candidates.length ? <div className="taxpayer-import-candidate-list"><strong>Một số MST sẽ được đồng bộ nguồn dữ liệu</strong><div className="taxpayer-import-candidate-scroll">{candidates.slice(0, 30).map((candidate) => <div className="taxpayer-import-candidate-row" key={candidate.taxCode}><span className="mono-value">{candidate.taxCode}</span><span>{[...new Set(candidate.sources.map((source) => source.sourceYear))].join(", ")}</span></div>)}</div>{candidates.length > 30 ? <small>Đang hiển thị 30/{formatCount(candidates.length)} MST.</small> : null}</div> : null}
+      {candidates.length ? <div className="taxpayer-import-candidate-list"><strong>MST sẽ được đối chiếu tên trước khi cập nhật dữ liệu</strong><div className="taxpayer-import-candidate-scroll">{candidates.slice(0, 30).map((candidate) => <div className="taxpayer-import-candidate-row" key={candidate.taxCode}><span><span className="mono-value">{candidate.taxCode}</span><small>{candidate.sources.find((source) => source.sourceVendorName)?.sourceVendorName ?? "Chưa có tên tham chiếu"}</small></span><span>{[...new Set(candidate.sources.map((source) => source.sourceYear))].join(", ")}</span></div>)}</div>{candidates.length > 30 ? <small>Đang hiển thị 30/{formatCount(candidates.length)} MST.</small> : null}</div> : null}
       {preview?.ignoredSheets?.length ? <div className="taxpayer-import-warning"><WarningCircle size={16} /><span>Sheet bị bỏ qua: {preview.ignoredSheets.join("; ")}</span></div> : null}
       {invalidRows.length ? <div className="taxpayer-import-warning"><WarningCircle size={16} /><span>Đã bỏ qua {formatCount(invalidRowCount)} dòng MST không hợp lệ. Bấm vào ô “Dòng không hợp lệ” để xem chi tiết.</span></div> : null}
       {showInvalidRows && invalidRows.length ? <div className="taxpayer-import-invalid-details">
@@ -343,12 +346,8 @@ export default function TaxpayerExcelImportModal({ onClose, onCompleted }: Props
 
   function renderCompleteStep() {
     if (!summary) return null;
-    const message = !summary.addedCount
-      ? "Đã hoàn tất ghi nhận nguồn dữ liệu Excel cho các MST đã có trong hệ thống."
-      : summary.failedCount
-      ? `Đã hoàn tất nhập Excel. Đã thêm ${formatCount(summary.addedCount)} MST mới và cập nhật thành công ${formatCount(summary.updatedCount)}/${formatCount(summary.addedCount)} thông tin MST; còn ${formatCount(summary.failedCount)} MST cần thử lại.`
-      : `Đã hoàn tất nhập Excel. Đã thêm ${formatCount(summary.addedCount)} MST mới và cập nhật thành công ${formatCount(summary.updatedCount)} thông tin MST từ endpoint.`;
-    return <div className="taxpayer-import-complete" role="status"><CheckCircle size={36} weight="duotone" /><strong>{message}</strong>{refreshErrors.length ? <div className="taxpayer-import-warning"><WarningCircle size={16} /><span>{refreshErrors.slice(0, 3).join("; ")}</span></div> : null}</div>;
+    const message = `Đã hoàn tất nhập Excel. Đã thêm ${formatCount(summary.addedCount)} MST mới và xử lý ${formatCount(summary.updatedCount + summary.reviewCount)} MST qua đối chiếu endpoint.`;
+    return <div className="taxpayer-import-complete" role="status"><CheckCircle size={36} weight="duotone" /><strong>{message}</strong>{summary.reviewCount ? <div className="taxpayer-import-warning"><WarningCircle size={16} /><span>{formatCount(summary.reviewCount)} MST lệch tên tham chiếu, đã giữ tên Excel và gắn cảnh báo vàng để đối chiếu thủ công.</span></div> : null}{summary.failedCount ? <div className="taxpayer-import-warning"><WarningCircle size={16} /><span>Còn {formatCount(summary.failedCount)} MST lỗi kỹ thuật cần thử lại.</span></div> : null}{refreshErrors.length ? <div className="taxpayer-import-warning"><WarningCircle size={16} /><span>{refreshErrors.slice(0, 3).join("; ")}</span></div> : null}</div>;
   }
 
   return <div className="confirm-backdrop">

@@ -62,6 +62,9 @@ type TaxpayerDetail = {
   last_checked_at: string | null;
   status_changed_at: string | null;
   last_error: string | null;
+  needs_manual_review: boolean;
+  manual_review_reason: string | null;
+  name_source: string;
   evidence?: TaxpayerEvidenceRecord | null;
 };
 
@@ -134,6 +137,13 @@ type RefreshAllResponse = {
 };
 
 type DeleteTarget = { taxCode: string; name: string | null };
+type ManualLookupCandidate = {
+  taxCode: string;
+  name: string | null;
+  address: string | null;
+  taxDepartment: string | null;
+  status: string | null;
+};
 type ManualLookupState = {
   taxCode: string;
   challengeId: string;
@@ -143,6 +153,7 @@ type ManualLookupState = {
   captchaFailureCount: number;
   requiresCaptchaRefresh: boolean;
   captchaLimitReached: boolean;
+  candidates: ManualLookupCandidate[];
   isSubmitting: boolean;
 };
 type ActivityRow = {
@@ -266,6 +277,7 @@ function formatDate(value: string | null) {
 }
 
 function statusLabel(taxpayer: TaxpayerDetail | null) {
+  if (taxpayer?.needs_manual_review) return "Chưa có dữ liệu";
   if (!taxpayer?.status) return "Chưa có dữ liệu";
   return taxpayer.status;
 }
@@ -304,9 +316,15 @@ function isSourceDataStale(value: string | null) {
 }
 
 function statusClass(taxpayer: TaxpayerDetail | null) {
+  if (taxpayer?.needs_manual_review) return "status-badge status-warning";
   if (taxpayer?.status_group === "active") return "status-badge status-success";
   if (taxpayer?.status_group === "inactive") return "status-badge status-danger";
   return "status-badge status-warning";
+}
+
+function taxpayerReviewLabel(taxpayer: TaxpayerDetail | null) {
+  if (!taxpayer?.needs_manual_review) return null;
+  return taxpayer.manual_review_reason ?? "Tên Excel chưa khớp dữ liệu endpoint; cần đối chiếu thủ công với Cục Thuế.";
 }
 
 function matchesTaxpayerQuery(row: TaxpayerRow, needle: string) {
@@ -665,9 +683,12 @@ export default function Dashboard({ username, role }: DashboardProps) {
     const needle = query.trim().toLowerCase();
     const result = displayRows.filter((row) => {
       const matchesText = matchesTaxpayerQuery(row, needle);
+      const effectiveStatusGroup = row.taxpayer?.needs_manual_review
+        ? "unknown"
+        : row.taxpayer?.status_group ?? "unknown";
       const matchesStatus = statusFilter === "all"
         || (statusFilter === "error" && Boolean(row.taxpayer?.last_error))
-        || (row.taxpayer?.status_group ?? "unknown") === statusFilter;
+        || effectiveStatusGroup === statusFilter;
       const matchesUnit = viewMode !== "sheets" || unitFilter === "all" || taxpayerUnitKey(row) === unitFilter;
       return matchesText && matchesStatus && matchesUnit;
     });
@@ -756,7 +777,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
       <tr className={`data-row ${isExpanded ? "data-row-expanded" : ""}`} onClick={() => setExpandedRow(isExpanded ? null : row.id)}>
         <td className="col-expand"><CaretRight size={16} className={isExpanded ? "caret-open" : ""} /></td>
         <td className="tax-code-cell"><span>{row.tax_code}</span></td>
-        <td><strong>{detail?.name ?? row.source_vendor_name ?? "Chưa có tên"}</strong>{sourceIsStale ? <small className="stale-source-label">Dữ liệu cũ</small> : null}<small>{detail?.address ?? ""}</small></td>
+        <td><span className="taxpayer-name-line"><strong>{detail?.name ?? row.source_vendor_name ?? "Chưa có tên"}</strong>{detail?.needs_manual_review ? <span className="taxpayer-review-marker" title={taxpayerReviewLabel(detail) ?? undefined} aria-label="Cần đối chiếu thủ công"><WarningCircle size={14} weight="fill" /></span> : null}</span>{sourceIsStale ? <small className="stale-source-label">Dữ liệu cũ</small> : null}<small>{detail?.address ?? ""}</small></td>
         <td><span className="sheet-label">{row.source_sheet}</span></td>
         <td><span className={statusClass(detail)}>{statusLabel(detail)}</span></td>
         <td className="date-cell">{formatDate(detail?.last_checked_at ?? null)}</td>
@@ -892,6 +913,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
         captchaFailureCount: 0,
         requiresCaptchaRefresh: false,
         captchaLimitReached: continuingAfterCaptchaLimit,
+        candidates: [],
         isSubmitting: false,
       });
     } catch (lookupError) {
@@ -930,6 +952,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
         captchaDataUrl?: string;
         captchaInvalid?: boolean;
         retryRequired?: boolean;
+        candidates?: ManualLookupCandidate[];
         taxpayer?: TaxpayerDetail;
       };
 
@@ -971,6 +994,21 @@ export default function Dashboard({ username, role }: DashboardProps) {
         setError(payload.error ?? "Cục Thuế không tìm thấy thông tin cho MST này.");
         return;
       }
+      if (response.status === 409) {
+        if (payload.candidates?.length) {
+          setManualLookup((current) => current ? {
+            ...current,
+            captcha: "",
+            candidates: payload.candidates ?? [],
+            error: payload.error ?? "Cục Thuế trả về nhiều dòng. Hãy chọn đúng dòng cần lưu.",
+            isSubmitting: false,
+          } : current);
+          return;
+        }
+        setManualLookup(null);
+        setError(payload.error ?? "Cục Thuế trả về nhiều dòng trùng MST; chưa thể tự chọn dữ liệu an toàn.");
+        return;
+      }
       if (!response.ok) throw new Error(payload.error ?? "Không thể hoàn tất tra cứu Cục Thuế.");
 
       setManualLookup(null);
@@ -980,6 +1018,37 @@ export default function Dashboard({ username, role }: DashboardProps) {
       setManualLookup((current) => current ? {
         ...current,
         error: lookupError instanceof Error ? lookupError.message : "Không thể hoàn tất tra cứu Cục Thuế.",
+        isSubmitting: false,
+      } : current);
+    }
+  }
+
+  async function applyManualLookupCandidate(candidateIndex: number) {
+    if (!manualLookup || manualLookup.isSubmitting || !manualLookup.candidates[candidateIndex]) return;
+    const currentLookup = manualLookup;
+    setManualLookup((current) => current ? { ...current, error: null, isSubmitting: true } : current);
+    setError(null);
+    try {
+      const response = await fetch("/api/taxpayer/manual-lookup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "apply",
+          taxCode: currentLookup.taxCode,
+          challengeId: currentLookup.challengeId,
+          candidateIndex,
+        }),
+        cache: "no-store",
+      });
+      const payload = await response.json().catch(() => ({})) as { error?: string; message?: string; taxpayer?: TaxpayerDetail };
+      if (!response.ok) throw new Error(payload.error ?? "Không thể lưu dòng Cục Thuế đã chọn.");
+      setManualLookup(null);
+      patchTaxpayerDetail(currentLookup.taxCode, payload.taxpayer);
+      setNotice(payload.message ?? "Đã cập nhật dữ liệu từ Cục Thuế.");
+    } catch (lookupError) {
+      setManualLookup((current) => current ? {
+        ...current,
+        error: lookupError instanceof Error ? lookupError.message : "Không thể lưu dòng Cục Thuế đã chọn.",
         isSubmitting: false,
       } : current);
     }
@@ -1302,11 +1371,11 @@ export default function Dashboard({ username, role }: DashboardProps) {
         <section className="confirm-dialog manual-lookup-dialog" role="dialog" aria-modal="true" aria-labelledby="manual-lookup-dialog-title" aria-describedby="manual-lookup-dialog-description">
           <div className="manual-lookup-heading"><div className="confirm-dialog-icon manual-lookup-icon"><MagnifyingGlass size={22} weight="duotone" /></div><button className="icon-button" type="button" aria-label="Đóng tra cứu thủ công" disabled={manualLookup.isSubmitting} onClick={() => setManualLookup(null)}><X size={17} /></button></div>
           <h2 id="manual-lookup-dialog-title">Tra cứu trực tiếp Cục Thuế</h2>
-          <p id="manual-lookup-dialog-description">MST <strong>{manualLookup.taxCode}</strong>. Nhập mã CAPTCHA trong ảnh để đối chiếu với dữ liệu hiện tại.</p>
-          <div className="manual-captcha-box"><img src={manualLookup.captchaDataUrl} alt="Mã CAPTCHA từ trang Cục Thuế" /><button className="outline-button" type="button" disabled={manualLookup.isSubmitting || isStartingManualLookup} onClick={() => void startManualLookup(manualLookup.taxCode, true)}><ArrowsClockwise size={15} className={isStartingManualLookup ? "update-icon-spinning" : ""} /> Mã khác</button></div>
-          <label className="manual-captcha-input"><span>Mã xác nhận</span><input value={manualLookup.captcha} onChange={(event) => setManualLookup((current) => current ? { ...current, captcha: event.target.value, error: null } : current)} disabled={manualLookup.requiresCaptchaRefresh} autoComplete="off" autoFocus maxLength={16} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void submitManualLookup(); } }} /></label>
+          <p id="manual-lookup-dialog-description">MST <strong>{manualLookup.taxCode}</strong>. {manualLookup.candidates.length ? "Cục Thuế trả về nhiều dòng; chọn đúng dòng chính thức để lưu." : "Nhập mã CAPTCHA trong ảnh để đối chiếu với dữ liệu hiện tại."}</p>
+          {manualLookup.candidates.length ? <div className="manual-lookup-candidates"><strong>Chọn dòng dữ liệu Cục Thuế</strong>{manualLookup.candidates.map((candidate, index) => <button className="manual-candidate-button" type="button" key={`${candidate.taxCode}-${candidate.name ?? "unknown"}-${index}`} disabled={manualLookup.isSubmitting} onClick={() => void applyManualLookupCandidate(index)}><span><b>{candidate.name ?? "Chưa có tên"}</b><small>{candidate.address ?? "Chưa có địa chỉ"}</small></span><em>{candidate.status ?? "Chưa có trạng thái"}</em></button>)}</div> : <><div className="manual-captcha-box"><img src={manualLookup.captchaDataUrl} alt="Mã CAPTCHA từ trang Cục Thuế" /><button className="outline-button" type="button" disabled={manualLookup.isSubmitting || isStartingManualLookup} onClick={() => void startManualLookup(manualLookup.taxCode, true)}><ArrowsClockwise size={15} className={isStartingManualLookup ? "update-icon-spinning" : ""} /> Mã khác</button></div>
+          <label className="manual-captcha-input"><span>Mã xác nhận</span><input value={manualLookup.captcha} onChange={(event) => setManualLookup((current) => current ? { ...current, captcha: event.target.value, error: null } : current)} disabled={manualLookup.requiresCaptchaRefresh} autoComplete="off" autoFocus maxLength={16} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void submitManualLookup(); } }} /></label></>}
           {manualLookup.error ? <div className="confirm-error"><WarningCircle size={16} /> {manualLookup.error}</div> : null}
-          <div className="confirm-actions"><button className="outline-button" type="button" disabled={manualLookup.isSubmitting} onClick={() => setManualLookup(null)}>Hủy</button><button className="export-button" type="button" disabled={manualLookup.isSubmitting || isStartingManualLookup || manualLookup.requiresCaptchaRefresh} onClick={() => void submitManualLookup()}>{manualLookup.isSubmitting ? "Đang đối chiếu..." : "Tra cứu"}</button></div>
+          <div className="confirm-actions"><button className="outline-button" type="button" disabled={manualLookup.isSubmitting} onClick={() => setManualLookup(null)}>Hủy</button>{manualLookup.candidates.length === 0 ? <button className="export-button" type="button" disabled={manualLookup.isSubmitting || isStartingManualLookup || manualLookup.requiresCaptchaRefresh} onClick={() => void submitManualLookup()}>{manualLookup.isSubmitting ? "Đang đối chiếu..." : "Tra cứu"}</button> : null}</div>
         </section>
       </div> : null}
       {deleteTarget ? <div className="confirm-backdrop">
@@ -1321,9 +1390,11 @@ export default function Dashboard({ username, role }: DashboardProps) {
       {canWrite && showImportModal ? <TaxpayerExcelImportModal
         onClose={() => setShowImportModal(false)}
         onCompleted={(summary) => {
-          setNotice(summary.failedCount
-            ? "Đã hoàn tất nhập Excel: thêm " + summary.addedCount.toLocaleString("vi-VN") + " MST, cập nhật thành công " + summary.updatedCount.toLocaleString("vi-VN") + "."
-            : "Đã hoàn tất nhập Excel: thêm và cập nhật " + summary.addedCount.toLocaleString("vi-VN") + " MST.");
+          setNotice(summary.reviewCount
+            ? "Đã nhập Excel: thêm " + summary.addedCount.toLocaleString("vi-VN") + " MST, có " + summary.reviewCount.toLocaleString("vi-VN") + " MST cần đối chiếu thủ công."
+            : summary.failedCount
+              ? "Đã hoàn tất nhập Excel: thêm " + summary.addedCount.toLocaleString("vi-VN") + " MST, còn " + summary.failedCount.toLocaleString("vi-VN") + " MST lỗi."
+              : "Đã hoàn tất nhập Excel: thêm và cập nhật " + summary.addedCount.toLocaleString("vi-VN") + " MST.");
           void loadData();
         }}
       /> : null}
@@ -1468,7 +1539,7 @@ function MobileTaxpayerCard({ row, canWrite, isExpanded, isUpdating, disableRefr
   return <article className={isExpanded ? "mobile-result-card mobile-result-card-expanded" : "mobile-result-card"}>
     <button className="mobile-result-summary" type="button" onClick={onToggle} aria-expanded={isExpanded}>
       <span className="mobile-result-topline"><span className="mobile-tax-code">{row.tax_code}</span><CaretRight size={18} className={isExpanded ? "caret-open" : ""} /></span>
-      <strong>{name}</strong>
+      <span className="taxpayer-name-line"><strong>{name}</strong>{detail?.needs_manual_review ? <span className="taxpayer-review-marker" title={taxpayerReviewLabel(detail) ?? undefined} aria-label="Cần đối chiếu thủ công"><WarningCircle size={14} weight="fill" /></span> : null}</span>
       <span className="mobile-result-status"><span className={statusClass(detail)}>{statusLabel(detail)}</span>{sourceIsStale ? <em>Dữ liệu nguồn cũ</em> : null}</span>
       <span className="mobile-result-meta">{taxpayerUnitLabel(row)} · Năm: {row.source_sheet} · Tra cứu: {formatDate(detail?.last_checked_at ?? null)}</span>
     </button>
@@ -1488,6 +1559,7 @@ function MobileTaxpayerCard({ row, canWrite, isExpanded, isUpdating, disableRefr
         compact
         onEvidenceChange={onEvidenceChange}
       />
+      {taxpayerReviewLabel(detail) ? <div className="mobile-detail-review"><WarningCircle size={16} /> {taxpayerReviewLabel(detail)}</div> : null}
       {detail?.last_error ? <div className="mobile-detail-error"><WarningCircle size={16} /> {detail.last_error}</div> : null}
       {canWrite ? <div className="mobile-result-actions">
         <button className="outline-button" type="button" title={refreshTitle} disabled={disableRefresh} onClick={onRefresh}><ArrowsClockwise size={16} className={isUpdating ? "update-icon-spinning" : ""} /> {isUpdating ? "Đang mở CAPTCHA" : "Đối chiếu Cục Thuế"}</button>
@@ -1860,7 +1932,7 @@ function TaxpayerEvidencePanel({
 
 function DetailPanel({ row, canWrite, onEvidenceChange }: { row: TaxpayerRow; canWrite: boolean; onEvidenceChange: (evidence: TaxpayerEvidenceRecord | null) => void }) {
   const detail = row.taxpayer;
-  return <div className="detail-panel" onClick={(event) => event.stopPropagation()}><div className="detail-title"><div><span>CHI TIẾT MST</span><h3>{detail?.name ?? row.source_vendor_name ?? "Chưa có tên"}</h3></div><span className={statusClass(detail)}>{statusLabel(detail)}</span></div><div className="detail-grid"><DetailItem label="Mã số thuế" value={row.tax_code} mono /><DetailItem label="Đơn vị" value={taxpayerUnitLabel(row)} /><DetailItem label="Năm theo dõi" value={row.source_year ?? row.source_sheet} /><DetailItem label="Loại tổ chức" value={detail?.org_type} /><DetailItem label="Cơ quan thuế" value={detail?.tax_department} /><TaxpayerEvidencePanel taxCode={row.tax_code} evidence={detail?.evidence} canWrite={canWrite} onEvidenceChange={onEvidenceChange} /><DetailItem label="Địa chỉ" value={detail?.address} wide /><DetailItem label="Dữ liệu lấy từ cục thuế lúc" value={formatDate(detail?.source_updated_at ?? null)} /><DetailItem label="Lần tra cứu trước đây" value={formatDate(detail?.previous_checked_at ?? null)} /><DetailItem label="Lần tra cứu mới nhất" value={formatDate(detail?.last_checked_at ?? null)} /></div>{detail?.last_error ? <div className="detail-error"><WarningCircle size={16} /> {detail.last_error}</div> : null}</div>;
+  return <div className="detail-panel" onClick={(event) => event.stopPropagation()}><div className="detail-title"><div><span>CHI TIẾT MST</span><h3>{detail?.name ?? row.source_vendor_name ?? "Chưa có tên"}</h3></div><span className={statusClass(detail)}>{statusLabel(detail)}</span></div>{taxpayerReviewLabel(detail) ? <div className="detail-review"><WarningCircle size={16} /> {taxpayerReviewLabel(detail)}</div> : null}<div className="detail-grid"><DetailItem label="Mã số thuế" value={row.tax_code} mono /><DetailItem label="Đơn vị" value={taxpayerUnitLabel(row)} /><DetailItem label="Năm theo dõi" value={row.source_year ?? row.source_sheet} /><DetailItem label="Loại tổ chức" value={detail?.org_type} /><DetailItem label="Cơ quan thuế" value={detail?.tax_department} /><TaxpayerEvidencePanel taxCode={row.tax_code} evidence={detail?.evidence} canWrite={canWrite} onEvidenceChange={onEvidenceChange} /><DetailItem label="Địa chỉ" value={detail?.address} wide /><DetailItem label="Dữ liệu lấy từ cục thuế lúc" value={formatDate(detail?.source_updated_at ?? null)} /><DetailItem label="Lần tra cứu trước đây" value={formatDate(detail?.previous_checked_at ?? null)} /><DetailItem label="Lần tra cứu mới nhất" value={formatDate(detail?.last_checked_at ?? null)} /></div>{detail?.last_error ? <div className="detail-error"><WarningCircle size={16} /> {detail.last_error}</div> : null}</div>;
 }
 
 function DetailItem({ label, value, mono = false, wide = false }: { label: string; value: string | null | undefined; mono?: boolean; wide?: boolean }) {

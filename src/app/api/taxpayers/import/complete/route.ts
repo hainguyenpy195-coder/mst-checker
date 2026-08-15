@@ -24,9 +24,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: READ_ONLY_FORBIDDEN_MESSAGE }, { status: 403 });
   }
 
-  let body: { importId?: unknown; updatedCount?: unknown; failedCount?: unknown };
+  let body: { importId?: unknown; updatedCount?: unknown; failedCount?: unknown; reviewCount?: unknown };
   try {
-    body = await request.json() as { importId?: unknown; updatedCount?: unknown; failedCount?: unknown };
+    body = await request.json() as { importId?: unknown; updatedCount?: unknown; failedCount?: unknown; reviewCount?: unknown };
   } catch {
     return NextResponse.json({ error: "Dữ liệu hoàn tất nhập Excel không hợp lệ." }, { status: 400 });
   }
@@ -36,7 +36,8 @@ export async function POST(request: Request) {
 
   const updatedCount = readCount(body.updatedCount);
   const failedCount = readCount(body.failedCount);
-  if (updatedCount === null || failedCount === null) {
+  const reviewCount = readCount(body.reviewCount ?? 0);
+  if (updatedCount === null || failedCount === null || reviewCount === null) {
     return NextResponse.json({ error: "Số liệu cập nhật MST không hợp lệ." }, { status: 400 });
   }
 
@@ -55,6 +56,7 @@ export async function POST(request: Request) {
       addedCount: importSession.added_count,
       updatedCount: importSession.updated_count,
       failedCount: importSession.failed_count,
+      reviewCount: importSession.review_count,
     });
   }
   if (!["previewed", "committing"].includes(importSession.status)) {
@@ -65,7 +67,7 @@ export async function POST(request: Request) {
   if (importSession.commit_offset < candidates.length) {
     return NextResponse.json({ error: "Vẫn còn MST chưa được thêm vào cơ sở dữ liệu." }, { status: 409 });
   }
-  if (updatedCount + failedCount > importSession.added_count) {
+  if (updatedCount + failedCount + reviewCount > candidates.length) {
     return NextResponse.json({ error: "Số MST cập nhật vượt quá số MST đã thêm." }, { status: 400 });
   }
 
@@ -86,6 +88,7 @@ export async function POST(request: Request) {
     added_count: importSession.added_count,
     updated_count: updatedCount,
     failed_count: failedCount,
+    review_count: reviewCount,
     source_years: sourceYears,
   };
   const { error: activityError } = await supabase.from("taxpayer_activity_logs").insert({
@@ -106,6 +109,7 @@ export async function POST(request: Request) {
     status: "completed",
     updated_count: updatedCount,
     failed_count: failedCount,
+    review_count: reviewCount,
     completed_at: new Date().toISOString(),
     error: null,
   }).eq("id", importSession.id).in("status", ["previewed", "committing"]);
@@ -119,5 +123,6 @@ export async function POST(request: Request) {
     addedCount: importSession.added_count,
     updatedCount,
     failedCount,
+    reviewCount,
   });
 }

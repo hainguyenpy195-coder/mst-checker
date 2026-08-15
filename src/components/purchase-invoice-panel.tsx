@@ -24,6 +24,7 @@ type PurchaseTaxpayerSummary = {
   name: string | null;
   status: string | null;
   status_group: "active" | "inactive" | "unknown" | null;
+  needs_manual_review: boolean;
   last_checked_at: string | null;
   last_error: string | null;
   refresh_state?: "queued" | "running" | "success" | "retry" | "dead_letter" | null;
@@ -124,6 +125,14 @@ function taxpayerStatusMeta(invoice: PurchaseInvoiceRecord): TaxpayerStatusMeta 
       label: "MST chưa có trên CSDL",
       className: "invoice-taxpayer-status purchase-taxpayer-missing",
       title: `MST ${taxCode} chưa có trong danh mục MST của hệ thống.`,
+    };
+  }
+
+  if (taxpayer.needs_manual_review) {
+    return {
+      label: "Cần đối chiếu tên",
+      className: "invoice-taxpayer-status invoice-taxpayer-unknown",
+      title: "Tên Excel chưa khớp tên endpoint. MST đang chờ đối chiếu thủ công với Cục Thuế.",
     };
   }
 

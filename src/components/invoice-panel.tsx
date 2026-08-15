@@ -118,6 +118,14 @@ function taxpayerStatusMeta(taxpayer: InvoiceTaxpayerSummary | null | undefined)
     };
   }
 
+  if (taxpayer.needs_manual_review) {
+    return {
+      label: "Cần đối chiếu tên",
+      className: "invoice-taxpayer-status invoice-taxpayer-unknown",
+      title: "Tên Excel chưa khớp tên endpoint. MST đang chờ đối chiếu thủ công với Cục Thuế.",
+    };
+  }
+
   if (taxpayer.last_error && taxpayer.refresh_state !== "success") {
     return {
       label: "Lỗi kiểm tra",

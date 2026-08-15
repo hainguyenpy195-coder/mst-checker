@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAdminSession, READ_ONLY_FORBIDDEN_MESSAGE } from "@/lib/app-auth";
-import { createGdtLookupSession, GdtLookupError, refreshGdtCaptcha, submitGdtLookup } from "@/lib/gdt-manual-lookup";
+import { createGdtLookupSession, GdtLookupError, refreshGdtCaptcha, submitGdtLookup, type GdtLookupRecord } from "@/lib/gdt-manual-lookup";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isValidTaxCode, normalizeTaxCode, TAX_CODE_FORMAT_MESSAGE } from "@/lib/tax-code";
 
@@ -15,6 +15,7 @@ type ManualLookupSession = {
   tax_code: string;
   upstream_cookie: string;
   expires_at: string;
+  candidate_records: GdtLookupRecord[];
 };
 
 type CurrentTaxpayer = {
@@ -31,13 +32,17 @@ type CurrentTaxpayer = {
   status_changed_at: string | null;
   last_error: string | null;
   consecutive_failures: number;
+  needs_manual_review: boolean;
+  manual_review_reason: string | null;
+  name_source: string;
 };
 
 type ManualLookupBody = {
-  action?: "start" | "submit";
+  action?: "start" | "submit" | "apply";
   taxCode?: string;
   challengeId?: string;
   captcha?: string;
+  candidateIndex?: number;
 };
 
 function statusGroup(status: string | null) {
@@ -80,7 +85,7 @@ async function startLookup(username: string, taxCode: string) {
   await supabase.from("manual_lookup_sessions").delete().eq("username", username);
   const { data: session, error: sessionError } = await supabase
     .from("manual_lookup_sessions")
-    .insert({ username, tax_code: taxCode, upstream_cookie: gdtSession.cookieHeader, expires_at: expiresAt })
+    .insert({ username, tax_code: taxCode, upstream_cookie: gdtSession.cookieHeader, expires_at: expiresAt, candidate_records: [] })
     .select("id")
     .single<{ id: string }>();
 
@@ -109,11 +114,30 @@ async function refreshCaptchaForSession(session: ManualLookupSession) {
   return refreshed;
 }
 
+async function readReferenceNames(taxCode: string) {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("taxpayer_sources")
+    .select("source_vendor_name, source_imported_at")
+    .eq("tax_code", taxCode)
+    .not("source_vendor_name", "is", null);
+  if (error) throw new Error("Không thể đọc tên tham chiếu của MST.");
+  const rows = data ?? [];
+  const latestSourceImportedAt = rows.reduce<string | null>((latest, source) => {
+    if (!source.source_imported_at) return latest;
+    return !latest || source.source_imported_at > latest ? source.source_imported_at : latest;
+  }, null);
+  return [...new Set(rows
+    .filter((source) => !latestSourceImportedAt || source.source_imported_at === latestSourceImportedAt)
+    .map((source) => source.source_vendor_name)
+    .filter((name): name is string => typeof name === "string" && Boolean(name.trim())))];
+}
+
 async function applyManualLookup(username: string, record: { taxCode: string; name: string | null; address: string | null; taxDepartment: string | null; status: string | null }) {
   const supabase = createAdminClient();
   const { data: current, error: currentError } = await supabase
     .from("taxpayers")
-    .select("tax_code, name, org_type, address, tax_department, status, status_group, source_updated_at, previous_checked_at, last_checked_at, status_changed_at, last_error, consecutive_failures")
+    .select("tax_code, name, org_type, address, tax_department, status, status_group, source_updated_at, previous_checked_at, last_checked_at, status_changed_at, last_error, consecutive_failures, needs_manual_review, manual_review_reason, name_source")
     .eq("tax_code", record.taxCode)
     .maybeSingle<CurrentTaxpayer>();
 
@@ -167,6 +191,9 @@ async function applyManualLookup(username: string, record: { taxCode: string; na
         status_changed_at: nextStatusChangedAt,
         last_error: null,
         consecutive_failures: 0,
+        needs_manual_review: false,
+        manual_review_reason: null,
+        name_source: "gdt_manual",
         next_check_at: nextCheckAt,
         raw_current_response: rawManualResponse,
       }
@@ -176,6 +203,9 @@ async function applyManualLookup(username: string, record: { taxCode: string; na
         source_updated_at: nextSourceUpdatedAt,
         last_error: null,
         consecutive_failures: 0,
+        needs_manual_review: false,
+        manual_review_reason: null,
+        name_source: "gdt_manual",
         next_check_at: nextCheckAt,
         raw_current_response: rawManualResponse,
       };
@@ -207,6 +237,9 @@ async function applyManualLookup(username: string, record: { taxCode: string; na
       last_checked_at: now,
       status_changed_at: nextStatusChangedAt,
       last_error: null,
+      needs_manual_review: false,
+      manual_review_reason: null,
+      name_source: "gdt_manual",
     },
   });
 }
@@ -219,7 +252,7 @@ export async function POST(request: Request) {
   }
 
   const body = await readBody(request);
-  if (!body || (body.action !== "start" && body.action !== "submit")) {
+  if (!body || (body.action !== "start" && body.action !== "submit" && body.action !== "apply")) {
     return NextResponse.json({ error: "Yêu cầu tra cứu Cục Thuế không hợp lệ." }, { status: 400 });
   }
 
@@ -230,12 +263,16 @@ export async function POST(request: Request) {
     if (body.action === "start") return await startLookup(session.username, taxCode);
 
     const captcha = body.captcha?.trim() ?? "";
-    if (!body.challengeId || !captcha) return NextResponse.json({ error: "Vui lòng nhập mã CAPTCHA." }, { status: 400 });
+    if (!body.challengeId) return NextResponse.json({ error: "Không xác định được phiên tra cứu." }, { status: 400 });
+    if (body.action === "submit" && !captcha) return NextResponse.json({ error: "Vui lòng nhập mã CAPTCHA." }, { status: 400 });
+    if (body.action === "apply" && (!Number.isInteger(body.candidateIndex) || (body.candidateIndex ?? -1) < 0)) {
+      return NextResponse.json({ error: "Dòng dữ liệu Cục Thuế được chọn không hợp lệ." }, { status: 400 });
+    }
 
     const supabase = createAdminClient();
     const { data: lookupSession, error: lookupSessionError } = await supabase
       .from("manual_lookup_sessions")
-      .select("id, username, tax_code, upstream_cookie, expires_at")
+      .select("id, username, tax_code, upstream_cookie, expires_at, candidate_records")
       .eq("id", body.challengeId)
       .eq("username", session.username)
       .maybeSingle<ManualLookupSession>();
@@ -246,8 +283,18 @@ export async function POST(request: Request) {
     }
     if (lookupSession.tax_code !== taxCode) return NextResponse.json({ error: "MST không khớp với phiên CAPTCHA." }, { status: 400 });
 
+    if (body.action === "apply") {
+      const candidate = lookupSession.candidate_records?.[body.candidateIndex ?? -1];
+      if (!candidate || candidate.taxCode !== taxCode) {
+        return NextResponse.json({ error: "Dòng dữ liệu Cục Thuế đã hết hiệu lực. Vui lòng tra cứu lại." }, { status: 409 });
+      }
+      await supabase.from("manual_lookup_sessions").delete().eq("id", lookupSession.id);
+      return await applyManualLookup(session.username, candidate);
+    }
+
     try {
-      const result = await submitGdtLookup(taxCode, captcha, lookupSession.upstream_cookie);
+      const referenceNames = await readReferenceNames(taxCode);
+      const result = await submitGdtLookup(taxCode, captcha, lookupSession.upstream_cookie, referenceNames);
       await supabase.from("manual_lookup_sessions").delete().eq("id", lookupSession.id);
       return await applyManualLookup(session.username, result.record);
     } catch (lookupError) {
@@ -267,10 +314,19 @@ export async function POST(request: Request) {
           retryRequired: true,
         }, { status: 422 });
       }
-      await supabase.from("manual_lookup_sessions").delete().eq("id", lookupSession.id);
       if (lookupError instanceof GdtLookupError && lookupError.kind === "not_found") {
+        await supabase.from("manual_lookup_sessions").delete().eq("id", lookupSession.id);
         return NextResponse.json({ error: lookupError.message }, { status: 404 });
       }
+      if (lookupError instanceof GdtLookupError && lookupError.kind === "ambiguous") {
+        const { error: candidateError } = await supabase
+          .from("manual_lookup_sessions")
+          .update({ candidate_records: lookupError.candidates })
+          .eq("id", lookupSession.id);
+        if (candidateError) throw candidateError;
+        return NextResponse.json({ error: lookupError.message, ambiguous: true, candidates: lookupError.candidates }, { status: 409 });
+      }
+      await supabase.from("manual_lookup_sessions").delete().eq("id", lookupSession.id);
       throw lookupError;
     }
   } catch (error) {

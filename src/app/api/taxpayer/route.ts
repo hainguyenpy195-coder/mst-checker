@@ -29,7 +29,7 @@ export async function GET(request: Request) {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("taxpayers")
-    .select("tax_code, name, org_type, address, tax_department, status, status_group, source_updated_at, previous_checked_at, last_checked_at, status_changed_at, last_error, next_check_at")
+    .select("tax_code, name, org_type, address, tax_department, status, status_group, source_updated_at, previous_checked_at, last_checked_at, status_changed_at, last_error, next_check_at, needs_manual_review, manual_review_reason, name_source")
     .eq("tax_code", taxCode)
     .maybeSingle<Taxpayer>();
 

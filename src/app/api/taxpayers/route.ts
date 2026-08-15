@@ -23,6 +23,9 @@ type TaxpayerRecord = {
   status_changed_at: string | null;
   last_error: string | null;
   next_check_at: string | null;
+  needs_manual_review: boolean;
+  manual_review_reason: string | null;
+  name_source: string;
 };
 
 type TaxpayerSourceUnitRecord = {
@@ -127,8 +130,8 @@ export async function GET(request: Request) {
   const taxCodes = [...new Set(sourceRows.map((source) => normalizeTaxCode(source.tax_code)))];
   const taxpayerResultPromise = taxCodes.length
     ? readInCodeBatches(taxCodes, (batch) => supabase
-        .from("taxpayers")
-        .select("tax_code, name, org_type, address, tax_department, status, status_group, source_updated_at, previous_checked_at, last_checked_at, status_changed_at, last_error, next_check_at")
+      .from("taxpayers")
+        .select("tax_code, name, org_type, address, tax_department, status, status_group, source_updated_at, previous_checked_at, last_checked_at, status_changed_at, last_error, next_check_at, needs_manual_review, manual_review_reason, name_source")
         .in("tax_code", batch))
     : { data: [], error: null };
   const evidenceResultPromise = taxCodes.length
@@ -202,7 +205,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: `Mã số thuế ${taxCode} đã tồn tại trong danh mục, không thể thêm trùng.` }, { status: 409 });
   }
 
-  const { error: taxpayerError } = await supabase.from("taxpayers").insert({ tax_code: taxCode, name, status_group: "unknown", next_check_at: new Date().toISOString() });
+  const { error: taxpayerError } = await supabase.from("taxpayers").insert({
+    tax_code: taxCode,
+    name,
+    status_group: "unknown",
+    next_check_at: new Date().toISOString(),
+    needs_manual_review: Boolean(name),
+    manual_review_reason: name ? "Tên nhập tay đang chờ đối chiếu với endpoint hoặc Cục Thuế." : null,
+    name_source: name ? "excel_reference" : "unknown",
+  });
   if (taxpayerError) {
     if (taxpayerError.code === "23505") {
       return NextResponse.json({ error: `Mã số thuế ${taxCode} đã tồn tại trong danh mục, không thể thêm trùng.` }, { status: 409 });

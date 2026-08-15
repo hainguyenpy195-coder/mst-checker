@@ -53,6 +53,7 @@ function parseCandidates(value: unknown): { candidates?: TaxpayerExcelCandidate[
       const sourceSheet = readText(sourceRecord.sourceSheet, 31);
       const sourceYear = readText(sourceRecord.sourceYear, 4);
       const sourceRow = Number(sourceRecord.sourceRow);
+      const sourceVendorName = readText(sourceRecord.sourceVendorName, 240);
       const sourceUnitKey = readText(sourceRecord.sourceUnitKey, 80);
       const sourceUnitLabel = readText(sourceRecord.sourceUnitLabel, 120);
       const sourceUnitMarker = readText(sourceRecord.sourceUnitMarker, 40);
@@ -70,6 +71,7 @@ function parseCandidates(value: unknown): { candidates?: TaxpayerExcelCandidate[
         sourceSheet,
         sourceYear,
         sourceRow,
+        sourceVendorName,
         sourceUnitKey,
         sourceUnitLabel,
         sourceUnitMarker,
@@ -161,6 +163,7 @@ export async function POST(request: Request) {
         source_sheet: source.sourceSheet,
         source_year: source.sourceYear,
         source_row: source.sourceRow,
+        source_vendor_name: source.sourceVendorName,
         source_unit_key: source.sourceUnitKey,
         source_unit_label: source.sourceUnitLabel,
         source_unit_marker: source.sourceUnitMarker,

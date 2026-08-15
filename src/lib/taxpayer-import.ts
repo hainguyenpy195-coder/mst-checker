@@ -22,6 +22,7 @@ export type TaxpayerImportSession = {
   added_count: number;
   updated_count: number;
   failed_count: number;
+  review_count: number;
   error: string | null;
   file_deleted_at: string | null;
   created_at: string;

@@ -4,6 +4,7 @@ type WorkerResult = {
   error?: string;
   skipped?: boolean;
   skipReason?: string;
+  needsManualReview?: boolean;
 };
 
 type WorkerRequest = {

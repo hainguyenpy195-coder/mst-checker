@@ -225,6 +225,10 @@ button:not(:disabled):active { transform: translateY(1px); }
 .data-table .unit-group-row td { padding: 11px 13px 9px; color: var(--accent-dark); background: var(--accent-soft); border-bottom: 1px solid var(--accent-border); text-align: center; }
 .data-table .unit-group-row strong { display: block; color: var(--accent-dark); font-size: 12px; font-weight: 720; }
 .data-table td strong { display: block; color: var(--ink); font-size: 13px; font-weight: 650; letter-spacing: -0.012em; }
+.taxpayer-name-line { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; }
+.taxpayer-name-line strong { min-width: 0; }
+.taxpayer-review-marker { display: inline-grid; width: 18px; height: 18px; flex: 0 0 18px; place-items: center; color: #9a6700; background: #fff3bf; border: 1px solid #f3cc63; border-radius: 50%; }
+.taxpayer-review-marker svg { display: block; }
 .data-table td small { display: block; max-width: 270px; margin-top: 4px; overflow: hidden; color: var(--muted); font-size: 11px; font-weight: 450; text-overflow: ellipsis; white-space: nowrap; }
 .data-table td small.stale-source-label { max-width: none; overflow: visible; color: var(--muted); font-style: italic; }
 .col-expand { width: 42px; padding-right: 0 !important; padding-left: 22px !important; color: var(--muted); }
@@ -250,6 +254,8 @@ button:not(:disabled):active { transform: translateY(1px); }
 .detail-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
 .detail-title > div > span { color: var(--accent-dark); font-size: 10px; font-weight: 720; letter-spacing: 0.11em; }
 .detail-title h3 { margin: 6px 0 0; color: var(--ink); font-size: 16px; font-weight: 720; letter-spacing: -0.02em; }
+.detail-review { display: flex; align-items: flex-start; gap: 7px; margin-top: 15px; padding: 10px 12px; color: #8a5a00; background: #fff8db; border: 1px solid #f1d27a; border-radius: var(--radius-control); font-size: 12px; line-height: 1.45; }
+.detail-review svg { flex: 0 0 auto; margin-top: 1px; }
 .detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; margin-top: 22px; }
 .detail-item { display: grid; gap: 6px; }
 .detail-item-wide { grid-column: 1 / -1; }
@@ -358,6 +364,14 @@ button:not(:disabled):active { transform: translateY(1px); }
 .manual-captcha-input { display: grid; gap: 7px; margin-top: 16px; color: var(--ink-soft); font-size: 12px; font-weight: 650; }
 .manual-captcha-input input { width: 100%; min-height: 40px; padding: 0 12px; color: var(--ink); background: var(--surface-soft); border: 1px solid var(--line); border-radius: var(--radius-control); outline: 0; font-size: 14px; letter-spacing: 0.08em; }
 .manual-captcha-input input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.manual-lookup-candidates { display: grid; gap: 8px; margin-top: 20px; }
+.manual-lookup-candidates > strong { color: var(--ink-soft); font-size: 12px; }
+.manual-candidate-button { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 11px 12px; color: var(--ink-soft); background: var(--surface-soft); border: 1px solid var(--line); border-radius: var(--radius-control); text-align: left; transition: border-color 150ms ease, background 150ms ease; }
+.manual-candidate-button:hover:not(:disabled) { background: var(--surface-hover); border-color: var(--accent-border); }
+.manual-candidate-button > span { display: grid; min-width: 0; gap: 4px; }
+.manual-candidate-button b { overflow: hidden; color: var(--ink); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.manual-candidate-button small { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.manual-candidate-button em { max-width: 150px; color: var(--warning); font-size: 10px; font-style: normal; font-weight: 680; text-align: right; }
 .confirm-dialog-icon { display: grid; width: 44px; height: 44px; place-items: center; color: var(--danger); background: var(--danger-soft); border: 1px solid var(--danger-border); border-radius: 14px; }
 .confirm-dialog h2 { margin: 17px 0 0; color: var(--ink); font-size: 21px; font-weight: 720; letter-spacing: -0.03em; }
 .confirm-dialog p { margin: 10px 0 0; color: var(--ink-soft); font-size: 13px; line-height: 1.6; }
@@ -611,6 +625,8 @@ button:not(:disabled):active { transform: translateY(1px); }
   .mobile-result-summary:hover { background: var(--surface-hover); }
   .mobile-result-topline { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
   .mobile-result-summary strong { display: -webkit-box; overflow: hidden; color: var(--ink); font-size: 14px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .mobile-result-summary .taxpayer-name-line { display: flex; }
+  .mobile-result-summary .taxpayer-name-line strong { display: -webkit-box; flex: 1; }
   .mobile-tax-code { color: var(--accent-dark); font-size: 12px; font-weight: 720; font-variant-numeric: tabular-nums; }
   .mobile-result-status { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
   .mobile-result-status em { color: var(--warning); font-size: 10px; font-style: normal; font-weight: 620; }
@@ -625,6 +641,8 @@ button:not(:disabled):active { transform: translateY(1px); }
   .mobile-evidence-section > span { color: var(--muted); font-size: 10px; }
   .mobile-detail-error { display: flex; align-items: flex-start; gap: 7px; margin-top: 13px; padding: 10px; color: var(--danger); background: var(--danger-soft); border: 1px solid var(--danger-border); border-radius: 9px; font-size: 11px; line-height: 1.45; }
   .mobile-detail-error svg { flex: 0 0 auto; margin-top: 1px; }
+  .mobile-detail-review { display: flex; align-items: flex-start; gap: 7px; margin-top: 13px; padding: 10px; color: #8a5a00; background: #fff8db; border: 1px solid #f1d27a; border-radius: 9px; font-size: 11px; line-height: 1.45; }
+  .mobile-detail-review svg { flex: 0 0 auto; margin-top: 1px; }
   .mobile-result-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 9px; margin-top: 14px; }
   .mobile-result-actions .outline-button { min-width: 0; min-height: 42px; padding: 0 10px; font-size: 11px; }
   .mobile-delete-action { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 42px; padding: 0 12px; color: var(--danger); background: var(--danger-soft); border: 1px solid var(--danger-border); border-radius: var(--radius-control); font-size: 11px; font-weight: 680; }

@@ -12,6 +12,9 @@ export type Taxpayer = {
   status_changed_at: string | null;
   last_error: string | null;
   next_check_at: string | null;
+  needs_manual_review: boolean;
+  manual_review_reason: string | null;
+  name_source: "unknown" | "excel_reference" | "endpoint" | "gdt_manual" | string;
 };
 
 export type TaxpayerEvidence = {

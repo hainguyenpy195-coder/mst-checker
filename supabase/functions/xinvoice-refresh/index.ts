@@ -75,9 +75,18 @@ type CurrentTaxpayer = {
   last_checked_at: string | null;
   last_error: string | null;
   consecutive_failures: number;
+  needs_manual_review: boolean;
+  manual_review_reason: string | null;
+  name_source: string;
 };
 
 type RefreshProvider = "xinvoice" | "vietqr";
+
+type JobOutcome = {
+  skipped: boolean;
+  needsManualReview?: boolean;
+  skipReason?: string;
+};
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
 const secretKeysJson = Deno.env.get("SUPABASE_SECRET_KEYS");
@@ -126,6 +135,22 @@ function normalizedDate(value: string | null | undefined) {
   if (!value) return null;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function normalizeTaxpayerName(value: string | null | undefined) {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[đĐ]/g, "d")
+    .toLocaleLowerCase("vi-VN")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function hasMatchingReferenceName(referenceNames: string[], endpointName: string | null | undefined) {
+  const normalizedEndpointName = normalizeTaxpayerName(endpointName);
+  const uniqueReferenceNames = [...new Set(referenceNames.map(normalizeTaxpayerName).filter(Boolean))];
+  return !uniqueReferenceNames.length || (uniqueReferenceNames.length === 1 && Boolean(normalizedEndpointName && uniqueReferenceNames[0] === normalizedEndpointName));
 }
 
 function shouldKeepCurrentSource(currentSourceUpdatedAt: string | null, incomingSourceUpdatedAt: string | null) {
@@ -314,14 +339,32 @@ async function markJobSuccess(taxCode: string) {
   if (error) throw error;
 }
 
-async function handleJob(job: RefreshJob, endpoints: EndpointSettings) {
-  const { data: current, error: currentError } = await supabase
-    .from("taxpayers")
-    .select("name, org_type, address, tax_department, status, status_group, source_updated_at, last_checked_at, last_error, consecutive_failures")
-    .eq("tax_code", job.tax_code)
-    .single<CurrentTaxpayer>();
+async function handleJob(job: RefreshJob, endpoints: EndpointSettings): Promise<JobOutcome> {
+  const [currentResult, sourceResult] = await Promise.all([
+    supabase
+      .from("taxpayers")
+      .select("name, org_type, address, tax_department, status, status_group, source_updated_at, last_checked_at, last_error, consecutive_failures, needs_manual_review, manual_review_reason, name_source")
+      .eq("tax_code", job.tax_code)
+      .single<CurrentTaxpayer>(),
+    supabase
+      .from("taxpayer_sources")
+      .select("source_vendor_name, source_imported_at")
+      .eq("tax_code", job.tax_code)
+      .not("source_vendor_name", "is", null),
+  ]);
 
-  if (currentError) throw currentError;
+  if (currentResult.error) throw currentResult.error;
+  if (sourceResult.error) throw sourceResult.error;
+  const current = currentResult.data;
+  const sourceRows = sourceResult.data ?? [];
+  const latestSourceImportedAt = sourceRows.reduce<string | null>((latest, source) => {
+    if (!source.source_imported_at) return latest;
+    return !latest || source.source_imported_at > latest ? source.source_imported_at : latest;
+  }, null);
+  const referenceNames = sourceRows
+    .filter((source) => !latestSourceImportedAt || source.source_imported_at === latestSourceImportedAt)
+    .map((source) => source.source_vendor_name)
+    .filter((name): name is string => typeof name === "string" && Boolean(name.trim()));
 
   const { payload, provider } = await fetchWithFallback(job.tax_code, endpoints);
   const now = new Date().toISOString();
@@ -331,6 +374,39 @@ async function handleJob(job: RefreshJob, endpoints: EndpointSettings) {
     last_checked_at: now,
   };
 
+  const shouldCompareReference = current.needs_manual_review || current.name_source === "excel_reference";
+  if (shouldCompareReference && !hasMatchingReferenceName(referenceNames, payload.name)) {
+    const mismatchUpdate = {
+      ...timestampUpdate,
+      // The Excel name remains visible as a provisional name. Clear the
+      // endpoint fields so stale data is not mistaken for the same seller.
+      name: referenceNames[0] ?? current.name,
+      org_type: null,
+      address: null,
+      tax_department: null,
+      status: null,
+      status_group: "unknown",
+      source_updated_at: null,
+      needs_manual_review: true,
+      manual_review_reason: new Set(referenceNames.map(normalizeTaxpayerName).filter(Boolean)).size > 1
+        ? "File Excel có nhiều tên tham chiếu khác nhau cho cùng MST."
+        : payload.name
+        ? `Tên Excel không khớp tên endpoint: ${payload.name}`
+        : "Endpoint không trả về tên để đối chiếu với tên Excel.",
+      name_source: "excel_reference",
+      last_error: null,
+      consecutive_failures: 0,
+      next_check_at: nextMonthlyRefreshAt(new Date(now)),
+    };
+    const { error: mismatchError } = await supabase
+      .from("taxpayers")
+      .update(mismatchUpdate)
+      .eq("tax_code", job.tax_code);
+    if (mismatchError) throw mismatchError;
+    await markJobSuccess(job.tax_code);
+    return { skipped: true, needsManualReview: true, skipReason: "name_mismatch" };
+  }
+
   if (shouldKeepCurrentSource(normalizedDate(current.source_updated_at), incomingSourceUpdatedAt)) {
     // The lookup succeeded, but the provider returned an older snapshot. Keep
     // the current taxpayer data and only record that the lookup was performed.
@@ -338,8 +414,12 @@ async function handleJob(job: RefreshJob, endpoints: EndpointSettings) {
       .from("taxpayers")
       .update({
         ...timestampUpdate,
+        name: payload.name ?? current.name,
         last_error: null,
         consecutive_failures: 0,
+        needs_manual_review: false,
+        manual_review_reason: null,
+        name_source: provider === "xinvoice" ? "endpoint" : current.name_source,
         next_check_at: nextMonthlyRefreshAt(new Date(now)),
       })
       .eq("tax_code", job.tax_code);
@@ -404,9 +484,19 @@ async function handleJob(job: RefreshJob, endpoints: EndpointSettings) {
         consecutive_failures: 0,
         next_check_at: nextMonthlyRefreshAt(new Date(now)),
         raw_current_response: { provider, payload },
+        needs_manual_review: false,
+        manual_review_reason: null,
+        name_source: provider === "xinvoice" ? "endpoint" : current.name_source,
       }
-    : current.last_error || current.consecutive_failures > 0
-      ? { ...timestampUpdate, last_error: null, consecutive_failures: 0 }
+    : current.last_error || current.consecutive_failures > 0 || current.needs_manual_review
+      ? {
+          ...timestampUpdate,
+          last_error: null,
+          consecutive_failures: 0,
+          needs_manual_review: false,
+          manual_review_reason: null,
+          name_source: provider === "xinvoice" ? "endpoint" : current.name_source,
+        }
       : timestampUpdate;
 
   const { error: updateError } = await supabase
@@ -420,10 +510,10 @@ async function handleJob(job: RefreshJob, endpoints: EndpointSettings) {
   return { skipped: false };
 }
 
-async function handleStatusJob(job: RefreshJob, endpoints: EndpointSettings, preferred: RefreshProvider) {
+async function handleStatusJob(job: RefreshJob, endpoints: EndpointSettings, preferred: RefreshProvider): Promise<JobOutcome> {
   const { data: current, error: currentError } = await supabase
     .from("taxpayers")
-    .select("name, org_type, address, tax_department, status, status_group, source_updated_at, last_checked_at, last_error, consecutive_failures")
+    .select("name, org_type, address, tax_department, status, status_group, source_updated_at, last_checked_at, last_error, consecutive_failures, needs_manual_review, manual_review_reason, name_source")
     .eq("tax_code", job.tax_code)
     .single<CurrentTaxpayer>();
 
@@ -432,6 +522,22 @@ async function handleStatusJob(job: RefreshJob, endpoints: EndpointSettings, pre
   const { payload, provider } = await fetchWithPreferredEndpoint(job.tax_code, endpoints, preferred);
   const now = new Date().toISOString();
   const incomingSourceUpdatedAt = normalizedDate(payload.updatedAt);
+
+  if (current.needs_manual_review || current.name_source === "excel_reference") {
+    const { error: reviewError } = await supabase
+      .from("taxpayers")
+      .update({
+        previous_checked_at: current.last_checked_at ?? null,
+        last_checked_at: now,
+        last_error: null,
+        consecutive_failures: 0,
+        next_check_at: nextMonthlyRefreshAt(new Date(now)),
+      })
+      .eq("tax_code", job.tax_code);
+    if (reviewError) throw reviewError;
+    await markJobSuccess(job.tax_code);
+    return { skipped: true, needsManualReview: true, skipReason: "name_mismatch" };
+  }
 
   if (shouldKeepCurrentSource(normalizedDate(current.source_updated_at), incomingSourceUpdatedAt)) {
     // The status endpoint succeeded, but its snapshot is older than (or has
@@ -444,6 +550,8 @@ async function handleStatusJob(job: RefreshJob, endpoints: EndpointSettings, pre
         last_checked_at: now,
         last_error: null,
         consecutive_failures: 0,
+        needs_manual_review: false,
+        manual_review_reason: null,
         next_check_at: nextMonthlyRefreshAt(new Date(now)),
       })
       .eq("tax_code", job.tax_code);
@@ -586,7 +694,13 @@ Deno.serve(async (request) => {
       return {
         tax_code: job.tax_code,
         ok: true,
-        ...(result.skipped ? { skipped: true, skipReason: "endpoint_not_newer_than_db" } : {}),
+        ...(result.skipped
+          ? {
+              skipped: true,
+              skipReason: result.skipReason ?? "endpoint_not_newer_than_db",
+              ...(result.needsManualReview ? { needsManualReview: true } : {}),
+            }
+          : {}),
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown worker error";
@@ -620,6 +734,7 @@ Deno.serve(async (request) => {
     processed: results.length,
     succeeded: results.filter((result) => result.ok && !result.skipped).length,
     skipped: results.filter((result) => result.ok && result.skipped).length,
+    needsManualReview: results.filter((result) => result.ok && result.needsManualReview).length,
     failed: results.filter((result) => !result.ok).length,
   };
   if (statusOnly) {

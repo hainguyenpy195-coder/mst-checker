@@ -20,12 +20,15 @@ type TaxpayerDetail = {
   last_checked_at: string | null;
   status_changed_at: string | null;
   last_error: string | null;
+  needs_manual_review: boolean;
+  manual_review_reason: string | null;
+  name_source: string;
 };
 
 async function readTaxpayerDetail(supabase: ReturnType<typeof createAdminClient>, taxCode: string) {
   const { data, error } = await supabase
     .from("taxpayers")
-    .select("tax_code, name, org_type, address, tax_department, status, status_group, source_updated_at, previous_checked_at, last_checked_at, status_changed_at, last_error")
+    .select("tax_code, name, org_type, address, tax_department, status, status_group, source_updated_at, previous_checked_at, last_checked_at, status_changed_at, last_error, needs_manual_review, manual_review_reason, name_source")
     .eq("tax_code", taxCode)
     .maybeSingle<TaxpayerDetail>();
   if (error) console.error("updated taxpayer detail read failed", error);

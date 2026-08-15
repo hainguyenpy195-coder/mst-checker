@@ -3,6 +3,7 @@ import { rootCertificates } from "node:tls";
 import { Agent } from "undici";
 import { normalizeTaxCode } from "@/lib/tax-code";
 import { GLOBALSIGN_RSA_OV_SSL_CA_2018 } from "@/lib/gdt-ca";
+import { normalizeTaxpayerName, taxpayerNamesMatch } from "@/lib/taxpayer-name";
 
 const GDT_BASE_URL = "https://tracuunnt.gdt.gov.vn";
 const GDT_LOOKUP_URL = `${GDT_BASE_URL}/tcnnt/mstdn.jsp`;
@@ -30,7 +31,8 @@ export type GdtLookupSession = {
 export class GdtLookupError extends Error {
   constructor(
     message: string,
-    public readonly kind: "captcha" | "not_found" | "empty" | "upstream" | "parse",
+    public readonly kind: "captcha" | "not_found" | "empty" | "upstream" | "parse" | "ambiguous",
+    public readonly candidates: GdtLookupRecord[] = [],
   ) {
     super(message);
     this.name = "GdtLookupError";
@@ -137,7 +139,7 @@ function extractRows(html: string) {
   return $("tr").toArray().map((row) => $(row).children("th,td").toArray().map((cell) => cleanText($(cell).text()) ?? ""));
 }
 
-function parseResult(html: string, requestedTaxCode: string): GdtLookupRecord {
+function parseResult(html: string, requestedTaxCode: string, referenceNames: string[] = []): GdtLookupRecord {
   const $ = cheerio.load(html);
   const bodyText = normalizedCell($("body").text());
   if (/vui lòng nhập đúng mã xác nhận|mã xác nhận.{0,50}(không đúng|không chính xác|sai)/i.test(bodyText)) {
@@ -161,8 +163,24 @@ function parseResult(html: string, requestedTaxCode: string): GdtLookupRecord {
   if (!resultRows.length) throw new GdtLookupError("Cục Thuế trả về bảng kết quả rỗng.", "empty");
 
   const normalizedRequestedTaxCode = normalizeTaxCode(requestedTaxCode);
-  const dataRow = resultRows.find((row) => row.some((cell) => normalizeTaxCode(cell) === normalizedRequestedTaxCode));
-  if (!dataRow) {
+  const findIndex = (pattern: RegExp) => headers.findIndex((header) => pattern.test(header));
+  const records = resultRows
+    .map((dataRow) => {
+      const valueAt = (pattern: RegExp) => {
+        const index = findIndex(pattern);
+        return index >= 0 ? cleanText(dataRow[index]) : null;
+      };
+      return {
+        taxCode: normalizeTaxCode(dataRow.find(isTaxCode) ?? ""),
+        name: valueAt(/tên người nộp thuế|tên tổ chức|tên người nộp/),
+        address: valueAt(/địa chỉ trụ sở|địa chỉ kinh doanh|địa chỉ/),
+        taxDepartment: valueAt(/cơ quan thuế/),
+        status: valueAt(/trạng thái mst|trạng thái mã số thuế/),
+      } satisfies GdtLookupRecord;
+    })
+    .filter((record) => record.taxCode === normalizedRequestedTaxCode);
+
+  if (!records.length) {
     throw new GdtLookupError(
       resultRows.length > 1
         ? "Cục Thuế trả về nhiều kết quả nhưng không có dòng khớp chính xác với MST đang tra cứu."
@@ -170,30 +188,28 @@ function parseResult(html: string, requestedTaxCode: string): GdtLookupRecord {
       "parse",
     );
   }
+  if (records.length === 1) return records[0];
 
-  const findIndex = (pattern: RegExp) => headers.findIndex((header) => pattern.test(header));
-  const valueAt = (pattern: RegExp) => {
-    const index = findIndex(pattern);
-    return index >= 0 ? cleanText(dataRow[index]) : null;
-  };
-  const taxCode = normalizeTaxCode(dataRow.find(isTaxCode) ?? "");
-  if (!taxCode || taxCode !== normalizedRequestedTaxCode) {
-    throw new GdtLookupError("Kết quả Cục Thuế không khớp với MST đang tra cứu.", "parse");
-  }
+  const uniqueReferenceNames = [...new Set(referenceNames.map(normalizeTaxpayerName).filter(Boolean))];
+  const nameMatches = uniqueReferenceNames.length === 1
+    ? records.filter((record) => referenceNames.some((referenceName) => taxpayerNamesMatch(referenceName, record.name)))
+    : [];
+  if (nameMatches.length === 1) return nameMatches[0];
 
-  return {
-    taxCode,
-    name: valueAt(/tên người nộp thuế|tên tổ chức|tên người nộp/),
-    address: valueAt(/địa chỉ trụ sở|địa chỉ kinh doanh|địa chỉ/),
-    taxDepartment: valueAt(/cơ quan thuế/),
-    status: valueAt(/trạng thái mst|trạng thái mã số thuế/),
-  };
+  throw new GdtLookupError(
+    nameMatches.length > 1
+      ? "Cục Thuế trả về nhiều dòng cùng MST và cùng tên tham chiếu; chưa thể tự chọn trạng thái an toàn."
+      : "Cục Thuế trả về nhiều dòng cùng MST nhưng không có dòng khớp duy nhất với tên tham chiếu.",
+    "ambiguous",
+    records,
+  );
 }
 
 export async function submitGdtLookup(
   taxCode: string,
   captcha: string,
   cookieHeader: string,
+  referenceNames: string[] = [],
 ) {
   const form = new URLSearchParams({
     cm: "cm",
@@ -217,7 +233,7 @@ export async function submitGdtLookup(
 
     const html = await response.response.text();
     try {
-      return { record: parseResult(html, taxCode), cookieHeader: response.nextCookieHeader };
+      return { record: parseResult(html, taxCode, referenceNames), cookieHeader: response.nextCookieHeader };
     } catch (error) {
       if (!(error instanceof GdtLookupError)) throw error;
       // CAPTCHA errors are returned immediately. The GDT site rotates the

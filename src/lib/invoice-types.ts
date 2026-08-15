@@ -7,6 +7,7 @@ export type InvoiceTaxpayerSummary = {
   name: string | null;
   status: string | null;
   status_group: string | null;
+  needs_manual_review: boolean;
   last_checked_at: string | null;
   last_error: string | null;
   refresh_state: TaxpayerRefreshState | null;

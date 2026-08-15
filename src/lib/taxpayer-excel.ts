@@ -24,6 +24,7 @@ export type TaxpayerExcelSource = {
   sourceSheet: string;
   sourceYear: string;
   sourceRow: number;
+  sourceVendorName: string | null;
   sourceUnitKey: string | null;
   sourceUnitLabel: string | null;
   sourceUnitMarker: string | null;
@@ -167,6 +168,7 @@ function findHeader(worksheet: ExcelJS.Worksheet) {
     return {
       rowNumber,
       taxCodeColumn,
+      vendorNameColumn: findColumn(headers, (value) => value.includes("ten nguoi ban")),
     };
   }
 
@@ -261,6 +263,9 @@ export async function parseTaxpayerWorkbook(buffer: Buffer | Uint8Array): Promis
         sourceSheet: sourceYear,
         sourceYear,
         sourceRow: rowNumber,
+        sourceVendorName: header.vendorNameColumn
+          ? cellText(row.getCell(header.vendorNameColumn).value) || null
+          : null,
         sourceUnitKey: currentUnit?.key ?? null,
         sourceUnitLabel: currentUnit?.sourceLabel ?? null,
         sourceUnitMarker: currentUnit?.sourceMarker ?? null,

@@ -10,6 +10,7 @@ type TaxpayerRow = {
   name: string | null;
   status: string | null;
   status_group: string | null;
+  needs_manual_review: boolean;
   last_checked_at: string | null;
   last_error: string | null;
 };
@@ -20,7 +21,7 @@ type RefreshQueueRow = {
   last_error: string | null;
 };
 
-const TAXPAYER_SELECT = "tax_code, name, status, status_group, last_checked_at, last_error";
+const TAXPAYER_SELECT = "tax_code, name, status, status_group, needs_manual_review, last_checked_at, last_error";
 const REFRESH_QUEUE_SELECT = "tax_code, state, last_error";
 
 export function normalizeInvoiceSellerTaxCode(value: string | null) {
@@ -66,6 +67,7 @@ export async function readInvoiceTaxpayerMap(supabase: InvoiceTaxpayerClient, ta
       name: taxpayer.name,
       status: taxpayer.status,
       status_group: taxpayer.status_group,
+      needs_manual_review: taxpayer.needs_manual_review,
       last_checked_at: taxpayer.last_checked_at,
       last_error: taxpayer.last_error ?? queue?.last_error ?? null,
       refresh_state: refreshState ?? null,
