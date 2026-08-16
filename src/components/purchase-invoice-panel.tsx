@@ -12,8 +12,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import type { AppRole } from "@/lib/app-auth";
-import { formatTaxpayerError } from "@/lib/taxpayer-error";
-import { isValidTaxCode, normalizeTaxCode } from "@/lib/tax-code";
+import { normalizeTaxCode } from "@/lib/tax-code";
 import PurchaseInvoiceExcelImportModal, {
   type PurchaseInvoiceImportSummary,
 } from "@/components/purchase-invoice-excel-import-modal";
@@ -62,12 +61,6 @@ type PurchaseInvoiceListResponse = {
   error?: string;
 };
 
-type TaxpayerStatusMeta = {
-  label: string;
-  className: string;
-  title: string;
-};
-
 function formatCount(value: number) {
   return Math.max(0, value).toLocaleString("vi-VN");
 }
@@ -95,85 +88,6 @@ function formatVietnameseDate(value: string | null | undefined) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat("vi-VN", { dateStyle: "short" }).format(date);
-}
-
-function taxpayerStatusMeta(invoice: PurchaseInvoiceRecord): TaxpayerStatusMeta {
-  const rawTaxCode = invoice.seller_tax_code?.trim() ?? "";
-  const taxCode = rawTaxCode ? normalizeTaxCode(rawTaxCode) : "";
-  const taxpayer = invoice.seller_taxpayer;
-
-  if (!taxCode) {
-    return {
-      label: "Chưa có MST",
-      className: "invoice-taxpayer-status invoice-taxpayer-unknown",
-      title: "Dòng hóa đơn không có mã số thuế người bán.",
-    };
-  }
-
-  if (!isValidTaxCode(taxCode)) {
-    return {
-      label: "MST không hợp lệ",
-      className: "invoice-taxpayer-status invoice-taxpayer-unknown",
-      title: "Mã số thuế người bán trong file Excel không đúng định dạng.",
-    };
-  }
-
-  // This wording is a business requirement: a valid seller tax code without a
-  // matching taxpayer catalogue record must be clearly distinguishable from a
-  // blank or malformed code.
-  if (!taxpayer) {
-    return {
-      label: "MST chưa có trên CSDL",
-      className: "invoice-taxpayer-status purchase-taxpayer-missing",
-      title: `MST ${taxCode} chưa có trong danh mục MST của hệ thống.`,
-    };
-  }
-
-  if (taxpayer.needs_manual_review) {
-    return {
-      label: "Cần đối chiếu tên",
-      className: "invoice-taxpayer-status invoice-taxpayer-unknown",
-      title: "Tên Excel chưa khớp tên endpoint. MST đang chờ đối chiếu thủ công với Cục Thuế.",
-    };
-  }
-
-  if (taxpayer.last_error && taxpayer.refresh_state !== "success") {
-    return {
-      label: "Lỗi kiểm tra",
-      className: "invoice-taxpayer-status invoice-taxpayer-error",
-      title: formatTaxpayerError(taxpayer.last_error) ?? taxpayer.last_error,
-    };
-  }
-
-  if (taxpayer.refresh_state === "queued" || taxpayer.refresh_state === "running" || taxpayer.refresh_state === "retry") {
-    return {
-      label: "Đang kiểm tra",
-      className: "invoice-taxpayer-status invoice-taxpayer-pending",
-      title: "MST đã có trong danh mục và đang được cập nhật trạng thái.",
-    };
-  }
-
-  if (taxpayer.status_group === "active") {
-    return {
-      label: "Đang hoạt động",
-      className: "invoice-taxpayer-status invoice-taxpayer-active",
-      title: taxpayer.status ?? "MST đang hoạt động.",
-    };
-  }
-
-  if (taxpayer.status_group === "inactive") {
-    return {
-      label: "Ngừng hoạt động",
-      className: "invoice-taxpayer-status invoice-taxpayer-inactive",
-      title: taxpayer.status ?? "MST đã ngừng hoạt động.",
-    };
-  }
-
-  return {
-    label: "Chưa có dữ liệu",
-    className: "invoice-taxpayer-status invoice-taxpayer-unknown",
-    title: taxpayer.status ?? "Chưa có dữ liệu trạng thái MST.",
-  };
 }
 
 function sourceLabel(invoice: PurchaseInvoiceRecord) {
@@ -356,7 +270,6 @@ export default function PurchaseInvoicePanel({ role }: { role: AppRole }) {
 }
 
 function PurchaseInvoiceTableRow({ invoice, onViewDetail }: { invoice: PurchaseInvoiceRecord; onViewDetail: (invoice: PurchaseInvoiceRecord) => void }) {
-  const taxpayerStatus = taxpayerStatusMeta(invoice);
   const taxCode = invoice.seller_tax_code?.trim() ? normalizeTaxCode(invoice.seller_tax_code) : null;
 
   function openDetail() {
@@ -379,7 +292,7 @@ function PurchaseInvoiceTableRow({ invoice, onViewDetail }: { invoice: PurchaseI
   >
     <td className="amount-cell">{formatVietnameseDate(invoice.invoice_issue_date)}</td>
     <td className="purchase-invoice-number-cell"><strong>{invoice.invoice_number ?? "—"}</strong></td>
-    <td className="purchase-seller-cell"><strong>{invoice.seller_name ?? invoice.seller_taxpayer?.name ?? "Chưa có tên người bán"}</strong><div className="invoice-seller-tax"><small className="mono-value">{taxCode ?? "Chưa có MST"}</small><span className={taxpayerStatus.className} title={taxpayerStatus.title}>{taxpayerStatus.label}</span></div></td>
+    <td className="purchase-seller-cell"><strong>{invoice.seller_name ?? invoice.seller_taxpayer?.name ?? "Chưa có tên người bán"}</strong><div className="invoice-seller-tax"><small className="mono-value">{taxCode ?? "Chưa có MST"}</small></div></td>
     <td className="purchase-goods-cell" title={invoice.goods_services ?? undefined}><span>{invoice.goods_services ?? "—"}</span></td>
     <td className="amount-cell">{formatAmount(invoice.net_amount)}</td>
     <td className="amount-cell">{formatAmount(invoice.deductible_vat_amount)}</td>
@@ -392,7 +305,6 @@ function PurchaseInvoiceTableSkeleton() {
 }
 
 function PurchaseInvoiceDetailDialog({ invoice, canDelete, onClose, onRequestDelete }: { invoice: PurchaseInvoiceRecord; canDelete: boolean; onClose: () => void; onRequestDelete: () => void }) {
-  const taxpayerStatus = taxpayerStatusMeta(invoice);
   const taxCode = invoice.seller_tax_code?.trim() ? normalizeTaxCode(invoice.seller_tax_code) : "";
 
   return <div className="confirm-backdrop">
@@ -410,7 +322,6 @@ function PurchaseInvoiceDetailDialog({ invoice, canDelete, onClose, onRequestDel
         <PurchaseInvoiceDetailField label="Ký hiệu" value={invoice.invoice_symbol} mono />
         <PurchaseInvoiceDetailField label="Người bán" value={invoice.seller_name ?? invoice.seller_taxpayer?.name} wide />
         <PurchaseInvoiceDetailField label="MST người bán" value={taxCode || invoice.seller_tax_code} mono />
-        <PurchaseInvoiceDetailField label="Tình trạng MST" value={<span className={taxpayerStatus.className} title={taxpayerStatus.title}>{taxpayerStatus.label}</span>} />
         <PurchaseInvoiceDetailField label="Mặt hàng / HHDV" value={invoice.goods_services} wide />
         <PurchaseInvoiceDetailField label="Giá trị HHDV chưa thuế" value={formatAmount(invoice.net_amount)} />
         <PurchaseInvoiceDetailField label="VAT được khấu trừ" value={formatAmount(invoice.deductible_vat_amount)} />

@@ -490,7 +490,6 @@ button:not(:disabled):active { transform: translateY(1px); }
 .invoice-taxpayer-inactive, .invoice-taxpayer-error { color: var(--danger); background: var(--danger-soft); border-color: var(--danger-border); }
 .invoice-taxpayer-pending { color: var(--warning); background: var(--warning-soft); border-color: var(--warning-border); }
 .invoice-taxpayer-unknown { color: var(--muted); background: var(--surface-soft); border-color: var(--line); }
-.purchase-taxpayer-missing { color: var(--warning); background: var(--warning-soft); border-color: var(--warning-border); }
 .invoice-verify-button { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 0 8px; color: var(--accent-dark); background: var(--accent-soft); border: 1px solid var(--accent-border); border-radius: 8px; font-size: 10px; font-weight: 700; white-space: nowrap; }
 .invoice-verify-button:hover:not(:disabled) { color: #ffffff; background: var(--accent); border-color: var(--accent); }
 .invoice-verify-button:disabled { color: var(--muted); background: var(--surface-soft); border-color: var(--line); }
