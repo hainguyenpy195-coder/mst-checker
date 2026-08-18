@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@/lib/supabase/admin";
 import type { TaxpayerExcelCandidate, TaxpayerExcelUnit } from "@/lib/taxpayer-excel";
 
 export const TAXPAYER_IMPORT_BUCKET = "taxpayer-imports";

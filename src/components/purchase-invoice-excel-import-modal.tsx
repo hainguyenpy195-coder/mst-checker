@@ -66,7 +66,6 @@ type PreviewResponse = {
 
 type UploadResponse = {
   importId?: string;
-  signedUrl?: string;
   error?: string;
 };
 
@@ -147,25 +146,17 @@ export default function PurchaseInvoiceExcelImportModal({ onClose, onCompleted }
     try {
       const uploadResponse = await fetch("/api/purchase-invoices/import/upload", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ fileName: file.name, fileSize: file.size, contentType: file.type }),
+        body: (() => {
+          const uploadBody = new FormData();
+          uploadBody.append("file", file);
+          return uploadBody;
+        })(),
         cache: "no-store",
       });
       const uploadPayload = await uploadResponse.json().catch(() => ({})) as UploadResponse;
-      if (!uploadResponse.ok || !uploadPayload.importId || !uploadPayload.signedUrl) {
-        throw new Error(uploadPayload.error ?? "Không thể chuẩn bị nơi tải file Excel lên.");
-      }
+      if (!uploadResponse.ok || !uploadPayload.importId) throw new Error(uploadPayload.error ?? "Không thể tải file Excel lên.");
 
       setImportId(uploadPayload.importId);
-      const uploadBody = new FormData();
-      uploadBody.append("cacheControl", "3600");
-      uploadBody.append("", file);
-      const storageResponse = await fetch(uploadPayload.signedUrl, {
-        method: "PUT",
-        headers: { "x-upsert": "false" },
-        body: uploadBody,
-      });
-      if (!storageResponse.ok) throw new Error("Không thể tải file Excel lên kho lưu trữ.");
 
       const previewResponse = await fetch("/api/purchase-invoices/import/preview", {
         method: "POST",

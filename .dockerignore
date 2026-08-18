@@ -1,0 +1,15 @@
+.git
+.gitignore
+.env*
+node_modules
+.next
+*.tsbuildinfo
+backups
+*.xlsx
+*.xls
+*.log
+supabase/.temp
+supabase/seed.sql
+storage
+reports
+coverage

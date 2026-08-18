@@ -33,14 +33,12 @@ export type WorkerResponse = {
 };
 
 function getWorkerConfig() {
-  const baseUrl = (process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").replace(/\/$/, "");
+  const baseUrl = (process.env.WORKER_INTERNAL_URL ?? "http://127.0.0.1:3001").replace(/\/$/, "");
   const workerSecret = process.env.REFRESH_WORKER_SECRET ?? "";
 
-  if (!baseUrl || !workerSecret || workerSecret.startsWith("replace_with_")) {
-    throw new Error("Worker cập nhật chưa được cấu hình trên server.");
-  }
+  if (!workerSecret || workerSecret.startsWith("replace_with_")) throw new Error("Worker cập nhật chưa được cấu hình trên server.");
 
-  return { url: `${baseUrl}/functions/v1/xinvoice-refresh`, workerSecret };
+  return { url: `${baseUrl}/refresh`, workerSecret };
 }
 
 async function invokeWorker(body: WorkerRequest): Promise<WorkerResponse> {

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { authenticateRequest, isAdminSession, READ_ONLY_FORBIDDEN_MESSAGE } from "@/lib/app-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { putStorageObject } from "@/lib/storage/local";
 import {
   getPurchaseInvoiceImportStoragePath,
   PURCHASE_INVOICE_IMPORT_BUCKET,
@@ -18,16 +19,20 @@ export async function POST(request: Request) {
   if (!session) return NextResponse.json({ error: "Bạn cần đăng nhập." }, { status: 401 });
   if (!isAdminSession(session)) return NextResponse.json({ error: READ_ONLY_FORBIDDEN_MESSAGE }, { status: 403 });
 
-  let body: { fileName?: unknown; fileSize?: unknown; contentType?: unknown };
+  let formData: FormData;
   try {
-    body = await request.json() as { fileName?: unknown; fileSize?: unknown; contentType?: unknown };
+    formData = await request.formData();
   } catch {
     return NextResponse.json({ error: "Thông tin file Excel không hợp lệ." }, { status: 400 });
   }
 
-  const fileName = typeof body.fileName === "string" ? body.fileName.trim() : "";
-  const fileSize = typeof body.fileSize === "number" ? body.fileSize : Number(body.fileSize);
-  const contentType = typeof body.contentType === "string" ? body.contentType : "";
+  const fileValue = formData.get("file");
+  if (!(fileValue instanceof File)) {
+    return NextResponse.json({ error: "Vui lòng chọn file Excel." }, { status: 400 });
+  }
+  const fileName = fileValue.name.trim();
+  const fileSize = fileValue.size;
+  const contentType = fileValue.type;
   if (!fileName || fileName.length > 255 || !fileName.toLowerCase().endsWith(".xlsx")) {
     return NextResponse.json({ error: "Chỉ chấp nhận file Excel định dạng .xlsx." }, { status: 415 });
   }
@@ -43,6 +48,10 @@ export async function POST(request: Request) {
 
   const importId = crypto.randomUUID();
   const storagePath = getPurchaseInvoiceImportStoragePath(importId);
+  const bytes = new Uint8Array(await fileValue.arrayBuffer());
+  if (bytes.length !== fileSize || bytes.length > PURCHASE_INVOICE_IMPORT_STORAGE_MAX_BYTES) {
+    return NextResponse.json({ error: "File Excel phải dưới 20MB." }, { status: 413 });
+  }
   const supabase = createAdminClient();
   const { error: insertError } = await supabase.from("purchase_invoice_imports").insert({
     id: importId,
@@ -56,20 +65,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Không thể tạo phiên nhập Excel Mua vào." }, { status: 500 });
   }
 
-  const { data: signedUpload, error: signedUploadError } = await supabase.storage
-    .from(PURCHASE_INVOICE_IMPORT_BUCKET)
-    .createSignedUploadUrl(storagePath, { upsert: false });
-  if (signedUploadError || !signedUpload) {
-    console.error("purchase invoice Excel signed upload URL creation failed", signedUploadError);
+  try {
+    await putStorageObject(PURCHASE_INVOICE_IMPORT_BUCKET, storagePath, bytes, { upsert: false });
+  } catch (storageError) {
+    console.error("purchase invoice Excel local storage upload failed", storageError);
     await supabase.from("purchase_invoice_imports").delete().eq("id", importId);
-    return NextResponse.json({ error: "Không thể chuẩn bị nơi tải file Excel lên." }, { status: 500 });
+    return NextResponse.json({ error: "Không thể lưu file Excel vào Storage nội bộ." }, { status: 500 });
   }
 
   return NextResponse.json({
     ok: true,
     importId,
-    signedUrl: signedUpload.signedUrl,
-    path: signedUpload.path,
+    path: storagePath,
     fileName,
   }, { headers: { "cache-control": "no-store" } });
 }

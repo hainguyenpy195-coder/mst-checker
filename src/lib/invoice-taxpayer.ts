@@ -1,6 +1,6 @@
 import { readInCodeBatches } from "@/lib/supabase-pagination";
 import { isValidTaxCode, normalizeTaxCode } from "@/lib/tax-code";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@/lib/supabase/admin";
 import type { InvoiceRecord, InvoiceTaxpayerSummary, TaxpayerRefreshState } from "@/lib/invoice-types";
 
 type InvoiceTaxpayerClient = SupabaseClient;

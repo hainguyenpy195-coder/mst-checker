@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { authenticateRequest, isAdminSession, READ_ONLY_FORBIDDEN_MESSAGE } from "@/lib/app-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isValidTaxCode, normalizeTaxCode, TAX_CODE_FORMAT_MESSAGE } from "@/lib/tax-code";
+import { deleteStorageObject, putStorageObject } from "@/lib/storage/local";
 import type { TaxpayerEvidence } from "@/lib/types";
 import {
   detectTaxpayerEvidenceMimeType,
@@ -58,18 +59,12 @@ export async function GET(request: Request) {
   }
   if (!evidence) return NextResponse.json({ evidence: null }, { headers: { "cache-control": "no-store" } });
 
-  const { data: signedUrl, error: signedUrlError } = await supabase.storage
-    .from(TAXPAYER_EVIDENCE_BUCKET)
-    .createSignedUrl(evidence.storage_path, 15 * 60);
-  if (signedUrlError || !signedUrl) {
-    console.error("taxpayer evidence signed URL creation failed", signedUrlError);
-    return NextResponse.json({ error: "Không thể mở ảnh bằng chứng." }, { status: 500 });
-  }
-
   return NextResponse.json({
     evidence: {
       ...summarizeEvidence(evidence),
-      url: signedUrl.signedUrl,
+      // The file route checks the same application session before streaming
+      // the private object. It replaces Supabase's 15-minute signed URL.
+      url: `/api/taxpayer/evidence/file?taxCode=${encodeURIComponent(taxCode)}`,
     },
   }, { headers: { "cache-control": "no-store" } });
 }
@@ -136,14 +131,9 @@ export async function POST(request: Request) {
   }
 
   const storagePath = getTaxpayerEvidenceStoragePath(taxCode, detectedMimeType);
-  const { error: uploadError } = await supabase.storage
-    .from(TAXPAYER_EVIDENCE_BUCKET)
-    .upload(storagePath, bytes, {
-      contentType: detectedMimeType,
-      cacheControl: "31536000",
-      upsert: false,
-    });
-  if (uploadError) {
+  try {
+    await putStorageObject(TAXPAYER_EVIDENCE_BUCKET, storagePath, bytes, { upsert: false });
+  } catch (uploadError) {
     console.error("taxpayer evidence upload failed", uploadError);
     return NextResponse.json({ error: "Không thể lưu ảnh bằng chứng vào Storage." }, { status: 500 });
   }
@@ -163,18 +153,16 @@ export async function POST(request: Request) {
 
   if (saveError || !savedEvidence) {
     console.error("taxpayer evidence metadata save failed", saveError);
-    await supabase.storage.from(TAXPAYER_EVIDENCE_BUCKET).remove([storagePath]);
+    await deleteStorageObject(TAXPAYER_EVIDENCE_BUCKET, storagePath);
     return NextResponse.json({ error: "Không thể lưu thông tin ảnh bằng chứng." }, { status: 500 });
   }
 
   let storageWarning: string | undefined;
   const oldStoragePath = existingResult.data?.storage_path;
   if (oldStoragePath && oldStoragePath !== storagePath) {
-    const { error: removeOldError } = await supabase.storage
-      .from(TAXPAYER_EVIDENCE_BUCKET)
-      .remove([oldStoragePath]);
-    if (removeOldError) {
-      console.error("old taxpayer evidence cleanup failed", removeOldError);
+    const removed = await deleteStorageObject(TAXPAYER_EVIDENCE_BUCKET, oldStoragePath);
+    if (!removed) {
+      console.error("old taxpayer evidence cleanup failed", oldStoragePath);
       storageWarning = "Ảnh mới đã được cập nhật nhưng ảnh cũ chưa được dọn khỏi Storage.";
     }
   }
@@ -216,11 +204,9 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Không thể xóa thông tin ảnh bằng chứng." }, { status: 500 });
   }
 
-  const { error: storageError } = await supabase.storage
-    .from(TAXPAYER_EVIDENCE_BUCKET)
-    .remove([evidence.storage_path]);
+  const storageRemoved = await deleteStorageObject(TAXPAYER_EVIDENCE_BUCKET, evidence.storage_path);
   return NextResponse.json({
     ok: true,
-    storageWarning: storageError ? "Thông tin ảnh đã được xóa nhưng file cũ chưa được dọn khỏi Storage." : undefined,
+    storageWarning: storageRemoved ? undefined : "Thông tin ảnh đã được xóa nhưng file cũ chưa được dọn khỏi Storage.",
   });
 }

@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@/lib/supabase/admin";
 import type { PurchaseInvoiceCandidate } from "@/lib/purchase-invoice-types";
 
 export const PURCHASE_INVOICE_IMPORT_BUCKET = "purchase-invoice-imports";

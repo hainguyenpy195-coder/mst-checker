@@ -1,14 +1,15 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { LocalDatabaseClient } from "@/lib/db/client";
 
-export function createAdminClient(): SupabaseClient {
-  const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const secretKey = process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
+let adminClient: LocalDatabaseClient | null = null;
 
-  if (!url || !secretKey) {
-    throw new Error("Thiếu SUPABASE_URL hoặc SUPABASE_SECRET_KEY trong môi trường server.");
-  }
-
-  return createClient(url, secretKey, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-  });
+/**
+ * Keep the historical module path so the API routes can migrate in small
+ * steps. The self-hosted deployment uses one server-side PostgreSQL client;
+ * browser requests never receive this object or the database credentials.
+ */
+export function createAdminClient() {
+  if (!adminClient) adminClient = new LocalDatabaseClient();
+  return adminClient;
 }
+
+export type SupabaseClient = LocalDatabaseClient;
