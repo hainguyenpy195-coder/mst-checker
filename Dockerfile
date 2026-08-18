@@ -28,7 +28,7 @@ COPY --from=builder --chown=node:nodejs /app/scripts/migrate-local.mjs ./scripts
 COPY --from=builder --chown=node:nodejs /app/scripts/refresh-worker.mjs ./scripts/refresh-worker.mjs
 COPY --from=builder --chown=node:nodejs /app/db ./db
 
-RUN mkdir -p /app/storage && chown node:nodejs /app/storage
+RUN mkdir -p /app/storage && chown node:node /app/storage
 
 USER node
 
