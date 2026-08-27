@@ -44,6 +44,16 @@ const TAXPAYER_BATCH_SIZE = 1000;
 const TAXPAYER_BATCH_RETRY_LIMIT = 3;
 const REFRESH_STATUS_INTERVAL_MS = 10_000;
 const MAX_CAPTCHA_FAILURES_BEFORE_REFRESH = 5;
+
+type CacheEntry = {
+  rows: TaxpayerRow[];
+  units: TaxpayerUnitRow[];
+  years: string[];
+  timestamp: number;
+};
+const dataCache = new Map<string, CacheEntry>();
+const CACHE_TTL_MS = 60 * 60 * 1000; // 1 giờ
+
 type ViewMode = DashboardView;
 
 function getLatestYear(years: string[]) {
@@ -459,6 +469,14 @@ export default function Dashboard({ username, role }: DashboardProps) {
   async function loadData() {
     if (!activeYear) return;
 
+    const cached = dataCache.get(activeYear);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+      setRows(cached.rows);
+      setUnits(cached.units);
+      if (cached.years.length) setYears(cached.years);
+      return;
+    }
+
     dataLoadController.current?.abort();
     const controller = new AbortController();
     dataLoadController.current = controller;
@@ -496,6 +514,14 @@ export default function Dashboard({ username, role }: DashboardProps) {
 
       if (controller.signal.aborted) return;
 
+      const nextYears = loadedYears?.length ? loadedYears : years;
+      dataCache.set(activeYear, {
+        rows: loadedRows,
+        units: loadedUnits ?? [],
+        years: nextYears,
+        timestamp: Date.now(),
+      });
+
       setRows(loadedRows);
       setUnits(loadedUnits ?? []);
       if (loadedYears?.length) {
@@ -520,6 +546,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
   }
 
   function patchTaxpayerDetail(taxCode: string, taxpayer: TaxpayerDetail | null | undefined) {
+    dataCache.clear();
     if (!taxpayer) return;
     setRows((currentRows) => currentRows.map((row) => row.tax_code === taxCode
       ? { ...row, taxpayer: { ...taxpayer, evidence: taxpayer.evidence ?? row.taxpayer?.evidence ?? null } }
@@ -527,6 +554,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
   }
 
   function patchTaxpayerCode(oldTaxCode: string, newTaxCode: string, taxpayer: TaxpayerDetail, message?: string) {
+    dataCache.clear();
     setRows((currentRows) => currentRows.map((row) => row.tax_code === oldTaxCode
       ? { ...row, tax_code: newTaxCode, taxpayer: { ...taxpayer, evidence: taxpayer.evidence ?? row.taxpayer?.evidence ?? null } }
       : row));
@@ -534,6 +562,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
   }
 
   function patchTaxpayerEvidence(taxCode: string, evidence: TaxpayerEvidenceRecord | null) {
+    dataCache.clear();
     setRows((currentRows) => currentRows.map((row) => row.tax_code === taxCode && row.taxpayer
       ? { ...row, taxpayer: { ...row.taxpayer, evidence } }
       : row));
@@ -1183,6 +1212,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
       setNewName("");
       setNewNote("");
       resetTaxCodeLookup();
+      dataCache.clear();
       setSelectedYear(newYear);
       navigateToView("sheets", newYear);
       setNotice(`Đã thêm MST ${taxCode} vào năm ${newYear}.`);
@@ -1237,6 +1267,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
       const deletedTaxCode = deleteTarget.taxCode;
       setExpandedRow(null);
       setDeleteTarget(null);
+      dataCache.clear();
       setNotice(payload.message ?? `Đã xóa MST ${deletedTaxCode} khỏi danh mục.`);
       await loadData();
       if (payload.activityWarning) setError(payload.activityWarning);
@@ -1401,6 +1432,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
       {canWrite && showImportModal ? <TaxpayerExcelImportModal
         onClose={() => setShowImportModal(false)}
         onCompleted={(summary) => {
+          dataCache.clear();
           setNotice(summary.reviewCount
             ? "Đã nhập Excel: thêm " + summary.addedCount.toLocaleString("vi-VN") + " MST, có " + summary.reviewCount.toLocaleString("vi-VN") + " MST cần đối chiếu thủ công."
             : summary.failedCount
