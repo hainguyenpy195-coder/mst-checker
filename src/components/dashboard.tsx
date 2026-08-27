@@ -183,7 +183,13 @@ type TaxCodeLookupResult = "ready" | "duplicate" | "unavailable" | "invalid" | "
 type TaxCodePreviewResponse = {
   exists?: boolean;
   taxCode?: string;
-  preview?: { name?: string | null };
+  preview?: {
+    name?: string | null;
+    address?: string | null;
+    status?: string | null;
+    tax_department?: string | null;
+    source_updated_at?: string | null;
+  };
   provider?: "xinvoice" | "vietqr";
   message?: string;
   error?: string;
@@ -1234,6 +1240,15 @@ export default function Dashboard({ username, role }: DashboardProps) {
     if (!nextVisible) resetTaxCodeLookup();
   }
 
+  function openAddFormWithData(taxCode: string, name?: string) {
+    if (!canWrite) return;
+    setNewTaxCode(taxCode);
+    setNewName(name ?? "");
+    setShowAddForm(true);
+    setError(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   function closeAddForm() {
     setShowAddForm(false);
     resetTaxCodeLookup();
@@ -1375,6 +1390,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
             onDelete={openDeleteDialog}
             onTaxCodeChange={(oldTaxCode, newTaxCode, taxpayer, message) => patchTaxpayerCode(oldTaxCode, newTaxCode, taxpayer, message)}
             onEvidenceChange={patchTaxpayerEvidence}
+            onOpenAddForm={canWrite ? openAddFormWithData : undefined}
           />
           <section className="table-section desktop-data-table">
             <div className="table-toolbar">
@@ -1467,6 +1483,7 @@ type MobileLookupPanelProps = {
   onDelete: (row: TaxpayerRow) => void;
   onTaxCodeChange: (oldTaxCode: string, newTaxCode: string, taxpayer: TaxpayerDetail, message?: string) => void;
   onEvidenceChange: (taxCode: string, evidence: TaxpayerEvidenceRecord | null) => void;
+  onOpenAddForm?: (taxCode: string, name?: string) => void;
 };
 
 function MobileLookupPanel({
@@ -1491,9 +1508,49 @@ function MobileLookupPanel({
   onDelete,
   onTaxCodeChange,
   onEvidenceChange,
+  onOpenAddForm,
 }: MobileLookupPanelProps) {
   const hasTextQuery = Boolean(query.trim());
   const mobileResults = lookupRows.slice(0, 20);
+  
+  const normalizedQuery = normalizeTaxCode(query);
+  const isQueryValidTaxCode = isValidTaxCode(normalizedQuery);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewResult, setPreviewResult] = useState<TaxCodePreviewResponse | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setPreviewResult(null);
+    setPreviewError(null);
+  }, [query]);
+
+  async function handleOnlineLookup() {
+    if (!isQueryValidTaxCode || previewLoading) return;
+    setPreviewLoading(true);
+    setPreviewError(null);
+    setPreviewResult(null);
+    try {
+      const response = await fetch("/api/taxpayers/preview", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ taxCode: normalizedQuery }),
+      });
+      const payload = await response.json() as TaxCodePreviewResponse;
+      if (!response.ok) throw new Error(payload.error ?? "Không thể kết nối dịch vụ tra cứu.");
+      if (payload.exists) {
+        setPreviewError(payload.message ?? `Mã số thuế ${normalizedQuery} đã tồn tại trong danh mục.`);
+        return;
+      }
+      if (!payload.preview) {
+        throw new Error("Worker không trả về thông tin MST.");
+      }
+      setPreviewResult(payload);
+    } catch (err) {
+      setPreviewError(err instanceof Error ? err.message : "Đã có lỗi xảy ra khi tra cứu.");
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
 
   return <section className="mobile-dashboard" aria-label="Tra cứu nhanh trên di động">
     <form className="mobile-lookup-card" onSubmit={onSearch}>
@@ -1542,6 +1599,45 @@ function MobileLookupPanel({
         <FileText size={25} weight="duotone" />
         <strong>Chưa tìm thấy bản ghi phù hợp</strong>
         <span>Thử lại bằng MST, tên nhà cung ứng hoặc thay đổi bộ lọc tình trạng.</span>
+        
+        {isQueryValidTaxCode ? (
+          <div className="mobile-online-lookup">
+            {previewResult ? (
+              <div className="mobile-preview-card">
+                <div className="mobile-preview-header">
+                  <strong>{previewResult.preview?.name ?? "Không có tên"}</strong>
+                  <span className="mobile-preview-provider">Nguồn: {previewResult.provider === "vietqr" ? "VietQR" : "XInvoice"}</span>
+                </div>
+                <dl className="mobile-preview-details">
+                  <div><dt>Mã số thuế</dt><dd>{normalizedQuery}</dd></div>
+                  <div><dt>Địa chỉ</dt><dd>{previewResult.preview?.address ?? "Chưa có"}</dd></div>
+                  <div><dt>Cơ quan thuế</dt><dd>{previewResult.preview?.tax_department ?? "Chưa có"}</dd></div>
+                  <div><dt>Trạng thái</dt><dd>{previewResult.preview?.status ?? "Chưa có"}</dd></div>
+                  <div><dt>Cập nhật</dt><dd>{formatSourceDate(previewResult.preview?.source_updated_at ?? null)}</dd></div>
+                </dl>
+                {canWrite && onOpenAddForm ? (
+                  <button className="export-button mobile-preview-add" type="button" onClick={() => onOpenAddForm(normalizedQuery, previewResult.preview?.name ?? "")}>
+                    <Plus size={16} /> Thêm vào danh mục
+                  </button>
+                ) : null}
+              </div>
+            ) : (
+              <button 
+                className="outline-button mobile-online-lookup-btn" 
+                type="button" 
+                onClick={() => void handleOnlineLookup()} 
+                disabled={previewLoading}
+              >
+                {previewLoading ? (
+                  <><ArrowsClockwise size={16} className="update-icon-spinning" /> Đang tra cứu...</>
+                ) : (
+                  <><MagnifyingGlass size={16} /> Tra cứu dữ liệu trực tuyến</>
+                )}
+              </button>
+            )}
+            {previewError ? <div className="mobile-inline-alert" role="alert" style={{ marginTop: "12px" }}><WarningCircle size={16} /> {previewError}</div> : null}
+          </div>
+        ) : null}
       </div> : <div className="mobile-result-list">
         {mobileResults.map((row) => <MobileTaxpayerCard
           key={row.id}

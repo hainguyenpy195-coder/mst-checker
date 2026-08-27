@@ -85,8 +85,8 @@ npm run build
 
 Remote dùng alias SSH đã cấu hình cho tài khoản `hainguyenpy195-coder`:
 
-```text
-git@github-hainguyenpy195-mst-checker:hainguyenpy195-coder/mst-checker.git
-```
-
-Chi tiết kiến trúc nằm trong [KE_HOACH_VERCEL_SUPABASE.md](./KE_HOACH_VERCEL_SUPABASE.md).
+## Session Log
+- [2026-08-27] Session: completed Phase 1 (Bổ sung tra cứu trực tuyến qua worker khi MST chưa có trong cơ sở dữ liệu ở giao diện mobile)
+  - Done: Cập nhật component `MobileLookupPanel` để gọi API `/api/taxpayers/preview` khi gõ MST hợp lệ nhưng không có kết quả cục bộ; thêm nút tự điền thông tin vào form lưu mới.
+  - Remaining: Chưa có
+  - Note for next session: Hệ thống hoạt động bình thường, typecheck passed.
