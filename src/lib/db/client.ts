@@ -443,6 +443,23 @@ async function enqueueAllTaxpayerRefreshes() {
   return result.rowCount ?? 0;
 }
 
+async function enqueueErrorTaxpayerRefreshes() {
+  const result = await getDatabasePool().query(
+    `insert into public.refresh_queue (tax_code, priority, state, attempts, run_after, locked_at, last_error)
+     select tax_code, 0, 'queued', 0, now(), null, null from public.taxpayers
+     where last_error is not null
+     on conflict (tax_code) do update set
+       priority = greatest(public.refresh_queue.priority, excluded.priority),
+       state = case when public.refresh_queue.state = 'running' then public.refresh_queue.state else 'queued' end,
+       attempts = case when public.refresh_queue.state = 'running' then public.refresh_queue.attempts else 0 end,
+       run_after = case when public.refresh_queue.state = 'running' then public.refresh_queue.run_after else excluded.run_after end,
+       locked_at = case when public.refresh_queue.state = 'running' then public.refresh_queue.locked_at else null end,
+       last_error = null,
+       updated_at = now()`,
+  );
+  return result.rowCount ?? 0;
+}
+
 async function consumeInvoiceScanQuota(params: Record<string, unknown>) {
   const limit = Math.max(1, Math.min(Number(params.p_limit ?? 200), 100000));
   const result = await getDatabasePool().query(
@@ -621,6 +638,7 @@ export class LocalDatabaseClient {
         case "request_taxpayer_refresh": data = await requestTaxpayerRefresh(params); break;
         case "set_refresh_worker_paused": data = await setRefreshPaused(params); break;
         case "enqueue_all_taxpayer_refreshes": data = await enqueueAllTaxpayerRefreshes(); break;
+        case "enqueue_error_taxpayer_refreshes": data = await enqueueErrorTaxpayerRefreshes(); break;
         case "consume_invoice_scan_quota": data = await consumeInvoiceScanQuota(params); break;
         case "import_taxpayer_batch": data = await importTaxpayerBatch(params); break;
         case "replace_taxpayer_source_units": data = await replaceTaxpayerSourceUnits(params); break;

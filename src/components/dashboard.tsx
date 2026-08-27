@@ -837,7 +837,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
     }
   }
 
-  async function refreshAllTaxpayers() {
+  async function refreshAllTaxpayers(mode: "start" | "start_errors" = "start") {
     if (!canWrite || refreshAllLock.current) return;
 
     refreshAllLock.current = true;
@@ -848,15 +848,15 @@ export default function Dashboard({ username, role }: DashboardProps) {
       const response = await fetch("/api/taxpayers/refresh-all", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ mode: "start" }),
+        body: JSON.stringify({ mode }),
         cache: "no-store",
       });
       const payload = await response.json() as RefreshAllResponse;
-      if (!response.ok) throw new Error(payload.error ?? "Không thể bắt đầu cập nhật toàn bộ.");
+      if (!response.ok) throw new Error(payload.error ?? (mode === "start_errors" ? "Không thể bắt đầu cập nhật MST lỗi." : "Không thể bắt đầu cập nhật toàn bộ."));
       applyRefreshAllStatus(payload, true);
       if (payload.message) setNotice(payload.message);
     } catch (refreshAllError) {
-      setError(refreshAllError instanceof Error ? refreshAllError.message : "Không thể bắt đầu cập nhật toàn bộ.");
+      setError(refreshAllError instanceof Error ? refreshAllError.message : (mode === "start_errors" ? "Không thể bắt đầu cập nhật MST lỗi." : "Không thể bắt đầu cập nhật toàn bộ."));
     } finally {
       refreshAllLock.current = false;
       setIsChangingRefreshAll(false);
@@ -1313,7 +1313,7 @@ export default function Dashboard({ username, role }: DashboardProps) {
 
           {notice ? <div className="page-notice page-notice-success" role="status"><CheckCircle size={18} /> {notice}</div> : null}
 
-          {viewMode === "settings" ? <EndpointSettingsPanel onRefreshAll={() => void refreshAllTaxpayers()} onPauseRefresh={() => void setRefreshAllPaused(true)} onResumeRefresh={() => void setRefreshAllPaused(false)} isRefreshingAll={isRefreshingAll} isChangingRefreshAll={isChangingRefreshAll} refreshAllProgress={refreshAllProgress} /> : null}
+          {viewMode === "settings" ? <EndpointSettingsPanel onRefreshAll={() => void refreshAllTaxpayers("start")} onRefreshErrors={() => void refreshAllTaxpayers("start_errors")} onPauseRefresh={() => void setRefreshAllPaused(true)} onResumeRefresh={() => void setRefreshAllPaused(false)} isRefreshingAll={isRefreshingAll} isChangingRefreshAll={isChangingRefreshAll} refreshAllProgress={refreshAllProgress} /> : null}
 
           {viewMode === "activity" ? <ActivityPanel rows={activityRows} isLoading={isActivityLoading} error={activityError} /> : null}
 
@@ -2017,6 +2017,7 @@ function DetailItem({ label, value, mono = false, wide = false }: { label: strin
 
 type EndpointSettingsPanelProps = {
   onRefreshAll: () => void;
+  onRefreshErrors: () => void;
   onPauseRefresh: () => void;
   onResumeRefresh: () => void;
   isRefreshingAll: boolean;
@@ -2024,7 +2025,7 @@ type EndpointSettingsPanelProps = {
   refreshAllProgress: RefreshAllProgress | null;
 };
 
-function EndpointSettingsPanel({ onRefreshAll, onPauseRefresh, onResumeRefresh, isRefreshingAll, isChangingRefreshAll, refreshAllProgress }: EndpointSettingsPanelProps) {
+function EndpointSettingsPanel({ onRefreshAll, onRefreshErrors, onPauseRefresh, onResumeRefresh, isRefreshingAll, isChangingRefreshAll, refreshAllProgress }: EndpointSettingsPanelProps) {
   const [primaryEndpoint, setPrimaryEndpoint] = useState("");
   const [fallbackEndpoint, setFallbackEndpoint] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -2082,7 +2083,7 @@ function EndpointSettingsPanel({ onRefreshAll, onPauseRefresh, onResumeRefresh, 
         ? <button className="outline-button" type="button" onClick={onResumeRefresh} disabled={isChangingRefreshAll}><Play size={17} /> {isChangingRefreshAll ? "Đang tiếp tục..." : "Tiếp tục cập nhật"}</button>
         : isRefreshingAll
           ? <button className="danger-button" type="button" onClick={onPauseRefresh} disabled={isChangingRefreshAll}><Pause size={17} /> {isChangingRefreshAll ? "Đang tạm dừng..." : "Tạm dừng cập nhật"}</button>
-          : <button className="outline-button" type="button" onClick={onRefreshAll} disabled={isChangingRefreshAll}><ArrowsClockwise size={17} /> Cập nhật toàn bộ</button>}
+          : <div style={{ display: 'flex', gap: '8px' }}><button className="outline-button" type="button" onClick={onRefreshErrors} disabled={isChangingRefreshAll}><WarningCircle size={17} /> Cập nhật MST lỗi</button><button className="outline-button" type="button" onClick={onRefreshAll} disabled={isChangingRefreshAll}><ArrowsClockwise size={17} /> Cập nhật toàn bộ</button></div>}
     </div>
     {isRefreshingAll && refreshAllProgress ? <div className="refresh-all-progress" role="status" aria-live="polite">
       <div className="refresh-all-progress-heading"><strong>Tiến trình cập nhật toàn bộ</strong><span>{refreshAllProgress.total ? `${formatCount(refreshAllProgress.completed)}/${formatCount(refreshAllProgress.total)} MST` : "Đang lấy tổng số MST..."}</span></div>

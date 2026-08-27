@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 const REFRESH_PAUSED_KEY = "refresh_worker_paused";
 const QUEUE_STATES = ["queued", "running", "retry", "success", "dead_letter", "cancelled"] as const;
 type QueueState = (typeof QUEUE_STATES)[number];
-type RefreshMode = "start" | "status" | "continue" | "pause" | "resume" | "stop";
+type RefreshMode = "start" | "start_errors" | "status" | "continue" | "pause" | "resume" | "stop";
 
 type QueueStatus = Record<QueueState, number> & {
   pending: number;
@@ -113,7 +113,7 @@ export async function POST(request: Request) {
   }
 
   const mode = body.mode ?? "start";
-  if (!["start", "status", "continue", "pause", "resume", "stop"].includes(mode)) {
+  if (!["start", "start_errors", "status", "continue", "pause", "resume", "stop"].includes(mode)) {
     return NextResponse.json({ error: "Chế độ cập nhật toàn bộ không hợp lệ." }, { status: 400 });
   }
 
@@ -131,6 +131,21 @@ export async function POST(request: Request) {
         message: status.pending
           ? "Đã đưa toàn bộ MST vào hàng đợi. Supabase Cron sẽ xử lý theo từng batch."
           : "Không có MST cần đưa vào hàng đợi.",
+      });
+    }
+
+    if (mode === "start_errors") {
+      await setRefreshPaused(supabase, false);
+      const { data, error } = await supabase.rpc("enqueue_error_taxpayer_refreshes");
+      if (error) throw error;
+
+      const status = await getRefreshStatus(supabase);
+      return statusResponse(status, {
+        started: true,
+        enqueued: Number(data ?? 0),
+        message: status.pending
+          ? "Đã đưa các MST bị lỗi vào hàng đợi. Supabase Cron sẽ xử lý theo từng batch."
+          : "Không có MST bị lỗi nào cần đưa vào hàng đợi.",
       });
     }
 
